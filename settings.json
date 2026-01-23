@@ -1,0 +1,7 @@
+{
+  "default_format": "m4a",
+  "default_quality": "320",
+  "output_dir": "./downloads",
+  "check_duplicates": true,
+  "theme": "dark"
+}
