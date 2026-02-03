@@ -87,10 +87,10 @@ class YTMusicDownloader:
             # Format selection: best audio quality
             'format': 'bestaudio/best',
             
-            # Output template with sanitized filename
+            # Output template with sanitized filename and video ID for thumbnail matching
             'outtmpl': os.path.join(
                 self.output_dir,
-                '%(title).200s.%(ext)s'
+                '%(title).200s [%(id)s].%(ext)s'
             ),
             
             # Post-processing for audio extraction
@@ -136,8 +136,58 @@ class YTMusicDownloader:
             opts['extract_flat'] = False
         else:
             opts['noplaylist'] = True  # Download single video only
+            
+        # Add local thumbnail saving hook
+        opts['progress_hooks'].append(self._save_thumbnail_hook)
         
         return opts
+
+    def _save_thumbnail_hook(self, d):
+        """Hook to save thumbnail before it gets embedded/deleted."""
+        if d['status'] == 'finished':
+            try:
+                from config import config
+                
+                # Get the downloaded filename (e.g. Song.m4a)
+                filename = d.get('filename')
+                if not filename:
+                    return
+                
+                # Capture filename for return value
+                self._captured_filename = filename
+                
+                # Get info dict for ID
+                info = d.get('info_dict', {})
+                video_id = info.get('id')
+                
+                # Check for potential thumbnail files
+                base_path = os.path.splitext(filename)[0]
+                
+                # Common thumbnail extensions
+                for ext in ['.webp', '.jpg', '.png', '.jpeg']:
+                    thumb_path = f"{base_path}{ext}"
+                    if os.path.exists(thumb_path):
+                        # Found the thumbnail!
+                        
+                        # Determine target name (prefer video_id, fallback to safe filename)
+                        if video_id:
+                            target_name = f"{video_id}{ext}"
+                        else:
+                            target_name = f"local_{os.path.basename(thumb_path)}"
+                            
+                        target_path = config.THUMBNAILS_DIR / target_name
+                        
+                        # Copy it (copy instead of move in case EmbedThumbnail needs it)
+                        shutil.copy2(thumb_path, target_path)
+                        
+                        # Store in d for later use if needed (though d is local to hook)
+                        # We rely on the DB update step to find this file based on ID
+                        break
+                        
+            except Exception as e:
+                # Don't fail the download just because thumbnail copy failed
+                if not self.quiet:
+                    print(f"Warning: Failed to save thumbnail: {e}")
     
     def get_info(self, url: str) -> dict:
         """
@@ -203,6 +253,15 @@ class YTMusicDownloader:
                 info = ydl.extract_info(url, download=True)
                 
                 if info:
+                    # Use captured filename from hook if available, otherwise prepare it
+                    final_filename = getattr(self, '_captured_filename', None)
+                    if not final_filename:
+                        final_filename = ydl.prepare_filename(info)
+                        # Adjust extension if needed (simple heuristic)
+                        if self.audio_format and not final_filename.endswith(f".{self.audio_format}"):
+                            base = os.path.splitext(final_filename)[0]
+                            final_filename = f"{base}.{self.audio_format}"
+
                     return {
                         'success': True,
                         'type': 'single',
@@ -210,6 +269,7 @@ class YTMusicDownloader:
                         'artist': info.get('artist') or info.get('uploader'),
                         'duration': info.get('duration'),
                         'thumbnail': info.get('thumbnail'),
+                        'filename': final_filename,
                         'url': url,
                         'output_dir': self.output_dir,
                     }

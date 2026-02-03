@@ -108,8 +108,6 @@ def start_download():
     try:
         info = YouTubeService.get_info(url)
     except Exception as e:
-        # If info fetch fails, we can still try in background, or fail early
-        # For now, fail early as invalid URL/Network error
         return jsonify({'error': str(e)}), 400
 
     # Check for duplicates (unless force=True)
@@ -146,30 +144,79 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
     print(f"[JOB:{job_id}] Starting background download for {url}", flush=True)
     
     from app.downloader import YTMusicDownloader
-    from app.models import Download, db
+    from app.models import Download
     
     queue_service.update_download(job_id, 
         started_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     )
     
-    def on_progress(info):
-        print(f"[JOB:{job_id}] Progress: {info.get('percent', 0)}% - {info.get('filename')}", flush=True)
+    def on_progress(prog_info):
+        print(f"[JOB:{job_id}] Progress: {prog_info.get('percent', 0)}% - {prog_info.get('filename')}", flush=True)
         queue_service.update_download(job_id,
             status='downloading',
-            progress=info.get('percent', 0),
-            speed=info.get('speed', 0),
-            eta=info.get('eta', 0),
-            total_bytes=info.get('total_bytes', 0),
-            filename=os.path.basename(info.get('filename', ''))
+            progress=prog_info.get('percent', 0),
+            speed=prog_info.get('speed', 0),
+            eta=prog_info.get('eta', 0),
+            total_bytes=prog_info.get('total_bytes', 0),
+            filename=os.path.basename(prog_info.get('filename', ''))
         )
     
-    def on_complete(info):
-        print(f"[JOB:{job_id}] Complete: {info.get('filename')}", flush=True)
+    def on_complete(comp_info):
+        print(f"[JOB:{job_id}] Complete: {comp_info.get('filename')}", flush=True)
         queue_service.update_download(job_id,
             status='processing',
             progress=100,
-            filename=os.path.basename(info.get('filename', ''))
+            filename=os.path.basename(comp_info.get('filename', ''))
         )
+    
+    def save_track(track_info):
+        """Save track to database with thumbnail fallback."""
+        try:
+            existing_id = track_info.get('id') or track_info.get('video_id')
+            if existing_id:
+                if Download.query.filter_by(video_id=existing_id).first():
+                    print(f"[JOB:{job_id}] Track already exists in DB, skipping", flush=True)
+                    return
+            
+            # Get thumbnail with multiple fallbacks
+            thumbnail = track_info.get('thumbnail')
+            if not thumbnail and track_info.get('thumbnails'):
+                thumbnails = track_info.get('thumbnails', [])
+                if thumbnails:
+                    thumbnail = thumbnails[-1].get('url')
+            if not thumbnail and existing_id:
+                thumbnail = f"https://i.ytimg.com/vi/{existing_id}/mqdefault.jpg"
+            
+            print(f"[JOB:{job_id}] Saving with thumbnail: {thumbnail[:60] if thumbnail else 'NONE'}...", flush=True)
+            
+            # Get filename
+            filename = track_info.get('filename', '')
+            if filename:
+                filename = os.path.basename(filename)
+            
+            # Get file size
+            file_size = 0
+            full_path = track_info.get('filename')
+            if full_path and os.path.exists(full_path):
+                file_size = os.path.getsize(full_path)
+            
+            Download.add(
+                video_id=existing_id,
+                title=track_info.get('title', 'Unknown'),
+                artist=track_info.get('artist') or track_info.get('uploader', 'Unknown'),
+                filename=filename,
+                format=audio_format.upper(),
+                quality=f'{quality}kbps',
+                thumbnail=thumbnail or '',
+                duration=track_info.get('duration', 0),
+                file_size=file_size
+            )
+            print(f"[JOB:{job_id}] ✅ Saved to DB: {track_info.get('title')}", flush=True)
+            
+        except Exception as db_err:
+            print(f"[JOB:{job_id}] ❌ DB Error: {db_err}", flush=True)
+            import traceback
+            traceback.print_exc()
     
     try:
         downloader = YTMusicDownloader(
@@ -187,6 +234,9 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
             info = downloader.get_info(url)
             print(f"[JOB:{job_id}] Info fetched: {info.get('title')}", flush=True)
         
+        # Debug: Log thumbnail from info
+        print(f"[JOB:{job_id}] Info thumbnail: {info.get('thumbnail', 'NONE')[:60] if info.get('thumbnail') else 'NONE'}", flush=True)
+        
         queue_service.update_download(job_id,
             title=info.get('title', 'Unknown'),
             thumbnail=info.get('thumbnail'),
@@ -195,7 +245,6 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
             video_id=info.get('id')
         )
 
-        
         print(f"[JOB:{job_id}] Starting download...", flush=True)
         result = downloader.download(url)
         print(f"[JOB:{job_id}] Download result success: {result.get('success')}", flush=True)
@@ -206,60 +255,21 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
                 completed_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             )
             
-            # Helper to save single track
-            def save_track(track_info):
-                try:
-                    # Check existing
-                    existing_id = track_info.get('id') or track_info.get('video_id')
-                    if existing_id:
-                        if Download.query.filter_by(video_id=existing_id).first():
-                            return
-                    
-                    Download.add(
-                        video_id=existing_id,
-                        title=track_info.get('title', 'Unknown'),
-                        artist=track_info.get('artist') or track_info.get('uploader', 'Unknown'),
-                        filename=os.path.basename(track_info.get('filename', '')),
-                        format=audio_format.upper(),
-                        quality=f'{quality}kbps',
-                        thumbnail=track_info.get('thumbnail', ''),
-                        duration=track_info.get('duration', 0),
-                        file_size=os.path.getsize(track_info.get('filename')) if track_info.get('filename') and os.path.exists(track_info.get('filename')) else 0
-                    )
-                except Exception as db_err:
-                    print(f"DB Error saving track {track_info.get('title')}: {db_err}")
-
+            # Merge info (has thumbnail) with result (has filename)
+            # info has: id, title, thumbnail, duration, uploader
+            # result has: success, filename, title, etc.
+            track_data = {**info, **result}
+            
+            print(f"[JOB:{job_id}] Merged track_data thumbnail: {track_data.get('thumbnail', 'NONE')[:60] if track_data.get('thumbnail') else 'NONE'}", flush=True)
+            
             # Need app context for DB operations
             from app import create_app
             app = create_app()
             with app.app_context():
-                if result.get('type') == 'playlist':
-                    print(f"[JOB:{job_id}] Saving playlist items to DB...", flush=True)
-                    # For playlists, we need to try and match downloaded items to files
-                    # The downloader result 'items' contains minimal info. 
-                    # But on_complete was called for each.
-                    # Ideally we should use the result['items'] combined with file existence
-                    pass # TODO: Implement better playlist metadata saving if needed
-                    
-                else:
-                    # Single file
-                    expected_file = result.get('filename') or os.path.join(
-                        str(config.DOWNLOAD_DIR),
-                        f"{info.get('title', 'unknown')}.{audio_format}"
-                    )
-                    
-                    # If file exists, update file size
-                    if os.path.exists(expected_file):
-                        info['filename'] = expected_file
-                        info['file_size'] = os.path.getsize(expected_file)
-                        queue_service.update_download(job_id,
-                            file_size=info['file_size'],
-                            filename=os.path.basename(expected_file)
-                        )
-                        save_track(info)
-                    
+                save_track(track_data)
+                
         else:
-            print(f"[JOB:{job_id}] Download process reported failure: {result.get('error')}", flush=True)
+            print(f"[JOB:{job_id}] Download failed: {result.get('error')}", flush=True)
             queue_service.update_download(job_id,
                 status='error',
                 error=result.get('error', 'Unknown error')
@@ -294,6 +304,12 @@ def list_downloads():
 def serve_download(filename):
     """Serve downloaded files for download."""
     return send_from_directory(str(config.DOWNLOAD_DIR), filename, as_attachment=True)
+
+
+@bp.route('/api/thumbnails/<filename>')
+def serve_thumbnail(filename):
+    """Serve downloaded thumbnails."""
+    return send_from_directory(str(config.THUMBNAILS_DIR), filename)
 
 
 @bp.route('/play/<filename>')
@@ -351,13 +367,9 @@ def start_playlist_download():
     if not selected_songs:
         return jsonify({'error': 'No songs provided'}), 400
     
-    # Create unique session ID
     session_id = str(uuid.uuid4())[:8]
-    
-    # Initialize session
     playlist_download_service.create_session(session_id, selected_songs)
     
-    # Start background download
     thread = threading.Thread(
         target=_background_playlist_download,
         args=(session_id,),
@@ -385,7 +397,7 @@ def _background_playlist_download(session_id):
     """Download playlist songs sequentially with status updates."""
     from app.services.playlist_download_service import playlist_download_service
     from app.downloader import YTMusicDownloader
-    from app.models import Download, db
+    from app.models import Download
     
     session = playlist_download_service.get_session(session_id)
     if not session:
@@ -396,13 +408,11 @@ def _background_playlist_download(session_id):
     for idx, song in enumerate(session['songs']):
         print(f"[PLAYLIST:{session_id}] Processing song {idx + 1}/{session['total']}: {song['title']}", flush=True)
         
-        # Update to downloading
         playlist_download_service.update_song_status(
             session_id, song['id'], 'downloading', progress=0
         )
         
         try:
-            # Create downloader with progress callback
             def progress_callback(data):
                 if data.get('status') == 'downloading':
                     playlist_download_service.update_song_status(
@@ -419,30 +429,37 @@ def _background_playlist_download(session_id):
                 on_progress=progress_callback
             )
             
-            # Download this song
             result = downloader.download_single(song['url'])
             
             if result.get('success'):
-                # Mark as completed
                 playlist_download_service.update_song_status(
                     session_id, song['id'], 'completed', progress=100
                 )
                 playlist_download_service.increment_completed(session_id)
                 
-                # Save to database
-                Download.add(
-                    video_id=result.get('id'),
-                    title=result.get('title'),
-                    artist=result.get('uploader'),
-                    filename=result.get('filename'),
-                    thumbnail=result.get('thumbnail'),
-                    duration=result.get('duration', 0),
-                    file_size=result.get('filesize', 0)
-                )
+                # Get thumbnail with fallback
+                thumbnail = song.get('thumbnail') or result.get('thumbnail')
+                if not thumbnail and song.get('id'):
+                    thumbnail = f"https://i.ytimg.com/vi/{song['id']}/mqdefault.jpg"
+                
+                # Save to database with app context
+                from app import create_app
+                app = create_app()
+                with app.app_context():
+                    # Check if already exists
+                    if not Download.query.filter_by(video_id=song.get('id')).first():
+                        Download.add(
+                            video_id=song.get('id') or result.get('id'),
+                            title=result.get('title') or song.get('title'),
+                            artist=result.get('uploader') or song.get('uploader', 'Unknown'),
+                            filename=os.path.basename(result.get('filename', '')),
+                            thumbnail=thumbnail or '',
+                            duration=result.get('duration') or song.get('duration', 0),
+                            file_size=result.get('filesize', 0)
+                        )
                 
                 print(f"[PLAYLIST:{session_id}] ✓ Completed: {song['title']}", flush=True)
             else:
-                # Mark as failed
                 error_msg = result.get('error', 'Unknown error')
                 playlist_download_service.update_song_status(
                     session_id, song['id'], 'failed', error=error_msg
@@ -451,7 +468,6 @@ def _background_playlist_download(session_id):
                 print(f"[PLAYLIST:{session_id}] ✗ Failed: {song['title']} - {error_msg}", flush=True)
                 
         except Exception as e:
-            # Mark as failed
             error_msg = str(e)
             playlist_download_service.update_song_status(
                 session_id, song['id'], 'failed', error=error_msg

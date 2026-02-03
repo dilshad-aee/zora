@@ -17,6 +17,7 @@ class Config:
     # Paths
     BASE_DIR = Path(__file__).parent.parent
     DOWNLOAD_DIR = BASE_DIR / 'downloads'
+    THUMBNAILS_DIR = DOWNLOAD_DIR / 'thumbnails'
     DATABASE_PATH = BASE_DIR / 'data.db'
     
     # Flask
@@ -40,6 +41,7 @@ class Config:
     def ensure_dirs(cls):
         """Ensure required directories exist."""
         cls.DOWNLOAD_DIR.mkdir(exist_ok=True)
+        cls.THUMBNAILS_DIR.mkdir(exist_ok=True)
 
 
 # Create default instance

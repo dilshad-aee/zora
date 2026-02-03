@@ -590,18 +590,47 @@ function updateLibrary() {
         return;
     }
 
-    grid.innerHTML = State.downloads.slice(0, 20).map(d => `
-        <div class="library-card" onclick="playTrack('${UI.escapeJs(d.filename)}', '${UI.escapeJs(d.title)}', '${UI.escapeJs(d.uploader)}', '${d.thumbnail || ''}')">
-            <img src="${d.thumbnail || ''}" alt="" class="library-card__thumb">
-            <div class="library-card__info">
-                <div class="library-card__title">${UI.escapeHtml(d.title || 'Unknown')}</div>
-                <div class="library-card__artist">${UI.escapeHtml(d.uploader || 'Unknown')}</div>
+    grid.innerHTML = State.downloads.slice(0, 20).map(d => {
+        // Safely get values with fallbacks
+        const filename = d.filename || '';
+        const title = d.title || 'Unknown Title';
+        const artist = d.artist || d.uploader || 'Unknown Artist';
+        const thumbnail = d.thumbnail || '';
+        
+        // Debug log
+        console.log('Library item:', { filename, title, artist });
+        
+        // Skip items without filename
+        if (!filename) {
+            console.warn('Skipping item without filename:', d);
+            return '';
+        }
+        
+        return `
+            <div class="library-card" onclick="playTrack('${UI.escapeJs(filename)}', '${UI.escapeJs(title)}', '${UI.escapeJs(artist)}', '${UI.escapeJs(thumbnail)}')">
+                <img src="${thumbnail}" alt="" class="library-card__thumb" onerror="this.src='/static/images/default-album.png'">
+                <div class="library-card__info">
+                    <div class="library-card__title">${UI.escapeHtml(title)}</div>
+                    <div class="library-card__artist">${UI.escapeHtml(artist)}</div>
+                </div>
             </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 function playTrack(filename, title, artist, thumbnail) {
+    console.log('=== PLAY TRACK DEBUG ===');
+    console.log('Filename:', filename);
+    console.log('Title:', title);
+    console.log('Artist:', artist);
+    console.log('Thumbnail:', thumbnail);
+    console.log('========================');
+    
+    if (!filename) {
+        UI.toast('Cannot play - no file found', 'error');
+        return;
+    }
+    
     Player.play(filename, title, artist, thumbnail);
 }
 

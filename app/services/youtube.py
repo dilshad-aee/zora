@@ -75,10 +75,22 @@ class YouTubeService:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 
+                # Get video ID
+                video_id = info.get('id')
+                
+                # Get thumbnail with multiple fallbacks
+                thumbnail = info.get('thumbnail')
+                if not thumbnail and info.get('thumbnails'):
+                    thumbnails = info.get('thumbnails', [])
+                    if thumbnails:
+                        thumbnail = thumbnails[-1].get('url')
+                if not thumbnail and video_id:
+                    thumbnail = f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
+                
                 result = {
-                    'id': info.get('id'),
+                    'id': video_id,
                     'title': info.get('title', 'Unknown'),
-                    'thumbnail': info.get('thumbnail'),
+                    'thumbnail': thumbnail,
                     'duration': info.get('duration'),
                     'duration_str': format_duration(info.get('duration', 0)),
                     'uploader': info.get('uploader') or info.get('artist', 'Unknown'),
