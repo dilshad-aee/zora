@@ -66,6 +66,8 @@ function switchTab(mode) {
     playlistTab?.classList.remove('active');
     searchTab?.classList.remove('active');
 
+    if (!input || !hint) return;
+
     if (mode === 'url') {
         urlTab?.classList.add('active');
         input.placeholder = 'Paste YouTube or YouTube Music URL here...';
@@ -80,12 +82,13 @@ function switchTab(mode) {
         hint.innerHTML = '<i class="fas fa-info-circle"></i> Type a song name and press Enter to search';
     }
 
-    input?.focus();
+    input.focus();
 }
 
 // ==================== Main Actions ====================
 async function handleMainAction() {
-    const input = document.getElementById('mainInput').value.trim();
+    const inputEl = document.getElementById('mainInput');
+    const input = inputEl?.value?.trim() ?? '';
     if (!input) {
         UI.toast('Please enter a URL or search term', 'error');
         return;
@@ -145,8 +148,8 @@ function showSearchResults(results) {
         `;
     } else {
         grid.innerHTML = results.map(r => `
-            <div class="result-card" onclick="selectResult('${r.url}')">
-                <img src="${r.thumbnail}" alt="" class="result-card__thumb">
+            <div class="result-card" onclick="selectResult('${encodeURIComponent(r.url)}')">
+                <img src="${r.thumbnail}" alt="" class="result-card__thumb" onerror="this.onerror=null;this.src='/static/images/default-album.png';">
                 <div class="result-card__info">
                     <div class="result-card__title">${UI.escapeHtml(r.title)}</div>
                     <div class="result-card__meta">${UI.escapeHtml(r.uploader || 'Unknown')} • ${r.duration_str || '0:00'}</div>
@@ -159,8 +162,10 @@ function showSearchResults(results) {
 }
 
 function selectResult(url) {
-    document.getElementById('mainInput').value = url;
-    fetchVideoInfo(url);
+    const decodedUrl = decodeURIComponent(url);
+    const inputEl = document.getElementById('mainInput');
+    if (inputEl) inputEl.value = decodedUrl;
+    fetchVideoInfo(decodedUrl);
 }
 
 function clearResults() {
@@ -198,6 +203,8 @@ function showPlaylistPreview(data) {
     document.getElementById('selectedCount').textContent = data.playlist_count;
 
     const itemsContainer = document.getElementById('playlistItems');
+    if (!itemsContainer) return;
+    
     itemsContainer.innerHTML = data.entries.map(item => `
         <div class="playlist-item">
             <input type="checkbox" 
@@ -206,10 +213,10 @@ function showPlaylistPreview(data) {
                    data-id="${item.id}"
                    checked
                    onchange="updateSelectedCount()">
-            <img src="${item.thumbnail}" alt="" class="playlist-item__thumb">
+            <img src="${item.thumbnail}" alt="" class="playlist-item__thumb" onerror="this.onerror=null;this.src='/static/images/default-album.png';">
             <div class="playlist-item__info">
                 <div class="playlist-item__title">${UI.escapeHtml(item.title)}</div>
-                <div class="playlist-item__meta">${UI.escapeHtml(item.uploader)} • ${item.duration_str}</div>
+                <div class="playlist-item__meta">${UI.escapeHtml(item.uploader || 'Unknown')} • ${item.duration_str || '0:00'}</div>
             </div>
         </div>
     `).join('');
@@ -618,28 +625,75 @@ function updateLibrary() {
     }).join('');
 }
 
+// Current playback index in library
+let currentPlayIndex = -1;
+
 function playTrack(filename, title, artist, thumbnail) {
-    console.log('=== PLAY TRACK DEBUG ===');
-    console.log('Filename:', filename);
-    console.log('Title:', title);
-    console.log('Artist:', artist);
-    console.log('Thumbnail:', thumbnail);
-    console.log('========================');
-    
     if (!filename) {
         UI.toast('Cannot play - no file found', 'error');
         return;
     }
     
+    // Find index in downloads array
+    currentPlayIndex = State.downloads.findIndex(d => d.filename === filename);
+    
     Player.play(filename, title, artist, thumbnail);
 }
 
+// Play next track (called by Player when song ends)
+function playNextTrack() {
+    if (State.downloads.length === 0) return;
+    
+    // Repeat One is handled in Player.onEnded, so if we get here it's not repeat-one
+    
+    let nextIndex;
+    
+    if (Player.shuffle) {
+        // Random track (not the same as current)
+        do {
+            nextIndex = Math.floor(Math.random() * State.downloads.length);
+        } while (nextIndex === currentPlayIndex && State.downloads.length > 1);
+    } else {
+        // Next in order
+        nextIndex = currentPlayIndex + 1;
+        
+        // End of list
+        if (nextIndex >= State.downloads.length) {
+            if (Player.repeat === 'all') {
+                nextIndex = 0; // Loop back to start
+            } else {
+                // No repeat - stop playback
+                Player.showToast('End of playlist');
+                return;
+            }
+        }
+    }
+    
+    const track = State.downloads[nextIndex];
+    if (track && track.filename) {
+        currentPlayIndex = nextIndex;
+        Player.play(track.filename, track.title || 'Unknown', track.artist || track.uploader || 'Unknown', track.thumbnail || '');
+    }
+}
+
+// Make it globally accessible for Player
+window.playNextTrack = playNextTrack;
+
 // ==================== Views ====================
 function showView(viewName) {
-    // Update nav
+    // View name mapping for nav matching
+    const viewNavMap = {
+        'download': 'download',
+        'library': 'library',
+        'queue': 'queue',
+        'playlist-downloads': 'download'
+    };
+    const navName = viewNavMap[viewName] || viewName;
+    
+    // Update nav using data attribute or text matching
     document.querySelectorAll('.nav-link').forEach(link => {
-        const text = link.textContent.toLowerCase().trim();
-        link.classList.toggle('active', text.includes(viewName));
+        const linkView = link.dataset.view || link.textContent.toLowerCase().trim();
+        link.classList.toggle('active', linkView === navName);
     });
 
     // Update views
@@ -655,6 +709,11 @@ function showView(viewName) {
         updateQueueView();
     } else if (viewName === 'playlist-downloads') {
         document.getElementById('playlistDownloadsView')?.classList.remove('hidden');
+    }
+    
+    // Update mobile nav if function exists
+    if (typeof updateMobileNav === 'function') {
+        updateMobileNav(viewName);
     }
 }
 

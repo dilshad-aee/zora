@@ -1,436 +1,146 @@
 /**
  * Zora - Audio Player Module
- * Clean, Mobile-Friendly Audio Player
+ * Handles audio playback, progress, and controls
  * 
- * @version 4.0.0
+ * @version 2.0.0
  * @author Zora Team
  */
 
 const Player = {
-    // Core elements
     audio: null,
-    progressBar: null,
-    progressFill: null,
-
-    // State
     currentTrack: null,
     isLoading: false,
     isReady: false,
-    isDragging: false,
     isInitialized: false,
-
-    // Features
-    playbackRate: 1.0,
+    
+    // Playback modes
+    shuffle: false,
+    repeat: 'off', // 'off', 'all', 'one'
+    
+    // Sleep timer
     sleepTimer: null,
     sleepTimerEnd: null,
-    savedPositions: {},
+    _sleepOutsideClickTimeout: null,
+    _sleepOutsideClickHandler: null,
+    
+    // Volume
+    savedVolume: 1,
 
     /**
      * Initialize the player
      */
     init() {
         if (this.isInitialized) return;
-
+        
         this.audio = document.getElementById('audioPlayer');
-        this.progressBar = document.getElementById('playerProgressBar');
-        this.progressFill = document.getElementById('playerProgress');
 
         if (!this.audio) {
             console.warn('Audio element not found');
             return;
         }
-
+        
         this.isInitialized = true;
+        
+        // Load saved settings
+        this.loadSettings();
+        
+        // Setup control buttons
+        this.setupControls();
 
-        // Load saved data
-        this.loadSavedPositions();
-        this.loadSavedVolume();
-
-        // Setup all event listeners
-        this.setupAudioEvents();
-        this.setupControlButtons();
-        this.setupProgressBar();
-        this.setupVolumeControl();
-        this.setupKeyboardShortcuts();
-        this.setupMediaSession();
-
-        console.log('🎵 Zora Player v4.0.0 initialized');
-    },
-
-    /**
-     * Setup control button event listeners
-     */
-    setupControlButtons() {
-        // Play/Pause button
-        const playBtn = document.getElementById('playPauseBtn');
-        if (playBtn) {
-            if (playBtn) {
-                playBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.toggle();
-                });
-            }
-        }
-
-        // Skip backward button
-        const skipBackBtn = document.getElementById('btnSkipBack');
-        if (skipBackBtn) {
-            skipBackBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                this.skipBackward(10);
-            });
-        }
-
-        // Skip forward button
-        const skipFwdBtn = document.getElementById('btnSkipForward');
-        if (skipFwdBtn) {
-            skipFwdBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                this.skipForward(10);
-            });
-        }
-
-        // Mute button
-        const muteBtn = document.getElementById('btnMute');
-        if (muteBtn) {
-            muteBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                this.toggleMute();
-            });
-        }
-
-        // Speed button
-        const speedBtn = document.getElementById('btnSpeed');
-        if (speedBtn) {
-            speedBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                this.cyclePlaybackRate();
-            });
-        }
-
-        // Sleep timer button
-        const sleepBtn = document.getElementById('btnSleepTimer');
-        if (sleepBtn) {
-            sleepBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof showSleepTimerMenu === 'function') {
-                    showSleepTimerMenu();
-                }
-            });
-        }
-    },
-
-    /**
-     * Setup volume slider
-     */
-    setupVolumeControl() {
-        const slider = document.getElementById('volumeSlider');
-        if (slider) {
-            slider.addEventListener('input', (e) => {
-                this.setVolume(e.target.value / 100);
-            });
-            slider.addEventListener('change', (e) => {
-                this.setVolume(e.target.value / 100);
-            });
-        }
-    },
-
-    /**
-     * Setup audio element events
-     */
-    setupAudioEvents() {
-        // Playback state changes
+        // Playback events
         this.audio.addEventListener('play', () => {
-            this.updatePlayButton(true);
-            this.updateMediaSession();
+            this.updateButton(true);
+            this.updateNowPlayingButtons();
         });
 
         this.audio.addEventListener('pause', () => {
-            this.updatePlayButton(false);
-            this.saveCurrentPosition();
+            this.updateButton(false);
+            this.updateNowPlayingButtons();
         });
 
         this.audio.addEventListener('ended', () => {
-            this.onTrackEnded();
+            this.onEnded();
         });
 
-        // Time updates
+        // Progress events
         this.audio.addEventListener('timeupdate', () => {
-            if (!this.isDragging) {
-                this.updateProgressBar();
-                this.updateTimeDisplay();
-            }
-            this.checkSleepTimer();
+            this.updateProgress();
+            this.updateNowPlayingProgress();
         });
 
         this.audio.addEventListener('loadedmetadata', () => {
-            this.updateDurationDisplay();
+            this.updateDuration();
+            this.syncNowPlayingUI();
             this.isReady = true;
-            this.restorePosition();
         });
 
-        // Loading states
-        this.audio.addEventListener('waiting', () => this.setLoading(true));
-        this.audio.addEventListener('canplay', () => this.setLoading(false));
-        this.audio.addEventListener('canplaythrough', () => this.setLoading(false));
+        // Loading events
+        this.audio.addEventListener('waiting', () => {
+            this.setLoading(true);
+        });
+
+        this.audio.addEventListener('canplay', () => {
+            this.setLoading(false);
+        });
+
+        this.audio.addEventListener('canplaythrough', () => {
+            this.setLoading(false);
+        });
 
         // Error handling
-        this.audio.addEventListener('error', (e) => this.handleError(e));
-
-        // Volume changes
-        this.audio.addEventListener('volumechange', () => {
-            this.updateVolumeIcon();
-            this.saveVolume();
+        this.audio.addEventListener('error', (e) => {
+            this.onError(e);
         });
+
+        // Mark as initialized
+        console.log('🎵 Player initialized');
     },
-
-    /**
-     * Setup progress bar with mouse and touch support
-     */
-    setupProgressBar() {
-        if (!this.progressBar) return;
-
-        // Click to seek
-        this.progressBar.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.seekToPosition(e);
-        });
-
-        // Mouse drag
-        this.progressBar.addEventListener('mousedown', (e) => {
-            e.stopPropagation();
-            this.startDrag(e);
-        });
-
-        // Touch drag
-        this.progressBar.addEventListener('touchstart', (e) => {
-            e.stopPropagation();
-            this.startDrag(e);
-        }, { passive: true });
-
-        // Document level events for drag
-        document.addEventListener('mousemove', (e) => {
-            if (this.isDragging) {
-                this.onDrag(e);
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (this.isDragging) {
-                this.endDrag();
-            }
-        });
-
-        document.addEventListener('touchmove', (e) => {
-            if (this.isDragging) {
-                this.onDrag(e);
-            }
-        }, { passive: true });
-
-        document.addEventListener('touchend', () => {
-            if (this.isDragging) {
-                this.endDrag();
-            }
-        });
-    },
-
-    /**
-     * Start dragging progress bar
-     */
-    startDrag(e) {
-        if (!this.audio || !this.audio.duration) return;
-        this.isDragging = true;
-        this.progressBar.classList.add('dragging');
-        this.seekToPosition(e);
-    },
-
-    /**
-     * Handle drag movement
-     */
-    onDrag(e) {
-        if (!this.isDragging) return;
-        this.seekToPosition(e);
-    },
-
-    /**
-     * End dragging
-     */
-    endDrag() {
-        this.isDragging = false;
-        if (this.progressBar) {
-            this.progressBar.classList.remove('dragging');
-        }
-    },
-
-    /**
-     * Seek to position based on event
-     */
-    seekToPosition(e) {
-        if (!this.audio || !this.audio.duration || !this.progressBar) return;
-
-        const rect = this.progressBar.getBoundingClientRect();
-        let clientX;
-
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-        } else if (e.changedTouches && e.changedTouches.length > 0) {
-            clientX = e.changedTouches[0].clientX;
-        } else {
-            clientX = e.clientX;
-        }
-
-        const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        const newTime = percent * this.audio.duration;
-
-        this.audio.currentTime = newTime;
-        this.updateProgressBar();
-        this.updateTimeDisplay();
-    },
-
-    /**
-     * Setup keyboard shortcuts
-     */
-    setupKeyboardShortcuts() {
-        document.addEventListener('keydown', (e) => {
-            // Don't trigger in input fields
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-            if (!this.audio) return;
-
-            switch (e.code) {
-                case 'Space':
-                    e.preventDefault();
-                    this.toggle();
-                    break;
-                case 'ArrowLeft':
-                    e.preventDefault();
-                    this.skipBackward(e.shiftKey ? 30 : 10);
-                    break;
-                case 'ArrowRight':
-                    e.preventDefault();
-                    this.skipForward(e.shiftKey ? 30 : 10);
-                    break;
-                case 'ArrowUp':
-                    e.preventDefault();
-                    this.adjustVolume(0.1);
-                    break;
-                case 'ArrowDown':
-                    e.preventDefault();
-                    this.adjustVolume(-0.1);
-                    break;
-                case 'KeyM':
-                    this.toggleMute();
-                    break;
-            }
-        });
-    },
-
-    /**
-     * Setup Media Session API for lock screen controls
-     */
-    setupMediaSession() {
-        if (!('mediaSession' in navigator)) return;
-
-        navigator.mediaSession.setActionHandler('play', () => this.resume());
-        navigator.mediaSession.setActionHandler('pause', () => this.pause());
-        navigator.mediaSession.setActionHandler('stop', () => this.stop());
-        navigator.mediaSession.setActionHandler('seekbackward', () => this.skipBackward(10));
-        navigator.mediaSession.setActionHandler('seekforward', () => this.skipForward(10));
-
-        navigator.mediaSession.setActionHandler('previoustrack', () => {
-            if (typeof Playlist !== 'undefined' && Playlist.playPrevious) {
-                Playlist.playPrevious();
-            }
-        });
-
-        navigator.mediaSession.setActionHandler('nexttrack', () => {
-            if (typeof Playlist !== 'undefined' && Playlist.playNext) {
-                Playlist.playNext();
-            }
-        });
-
-        try {
-            navigator.mediaSession.setActionHandler('seekto', (details) => {
-                if (details.seekTime !== undefined && this.audio) {
-                    this.audio.currentTime = details.seekTime;
-                }
-            });
-        } catch (e) {
-            // Seek not supported
-        }
-    },
-
-    /**
-     * Update Media Session metadata
-     */
-    updateMediaSession() {
-        if (!('mediaSession' in navigator) || !this.currentTrack) return;
-
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: this.currentTrack.title || 'Unknown Title',
-            artist: this.currentTrack.artist || 'Unknown Artist',
-            album: this.currentTrack.album || '',
-            artwork: [
-                {
-                    src: this.currentTrack.thumbnail || '/static/images/default-album.png',
-                    sizes: '512x512',
-                    type: 'image/png'
-                }
-            ]
-        });
-
-        if (this.audio && !isNaN(this.audio.duration)) {
-            try {
-                navigator.mediaSession.setPositionState({
-                    duration: this.audio.duration,
-                    playbackRate: this.playbackRate,
-                    position: this.audio.currentTime
-                });
-            } catch (e) {
-                // Position state not supported
-            }
-        }
-    },
-
-    // ==================== PLAYBACK CONTROLS ====================
 
     /**
      * Play a track
+     * @param {string} filename - Audio file name
+     * @param {string} title - Track title
+     * @param {string} artist - Artist name
+     * @param {string} thumbnail - Thumbnail URL
      */
-    play(filename, title, artist, thumbnail, album = '') {
-        if (!filename || !this.audio) {
-            console.warn('Cannot play: missing filename or audio element');
+    play(filename, title, artist, thumbnail) {
+        if (!filename) {
+            console.warn('No filename provided');
             return;
         }
 
-        // Save current position before switching
-        this.saveCurrentPosition();
+        if (!this.audio) {
+            console.warn('Audio element not initialized');
+            return;
+        }
 
         // Reset state
         this.isReady = false;
         this.setLoading(true);
+
+        // Stop current playback cleanly
         this.audio.pause();
 
         // Set new source
         this.audio.src = `/play/${encodeURIComponent(filename)}`;
-        this.currentTrack = { filename, title, artist, thumbnail, album };
+        this.currentTrack = { filename, title, artist, thumbnail };
 
-        // Apply playback rate
-        this.audio.playbackRate = this.playbackRate;
+        // Update UI elements safely
+        this.updatePlayerUI(title, artist, thumbnail);
 
-        // Update UI
-        this.updateTrackInfo(title, artist, thumbnail);
-        this.showPlayer();
+        // Show player bar
+        if (typeof UI !== 'undefined' && UI.show) {
+            UI.show('playerBar');
+        } else {
+            const playerBar = document.getElementById('playerBar');
+            if (playerBar) playerBar.style.display = 'block';
+        }
 
         // Load and play
         this.audio.load();
 
         const playPromise = this.audio.play();
+
         if (playPromise !== undefined) {
             playPromise
                 .then(() => {
@@ -438,12 +148,63 @@ const Player = {
                     this.setLoading(false);
                 })
                 .catch((error) => {
-                    if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
-                        console.error('Playback error:', error);
-                        this.showToast('Error playing audio', 'error');
-                    }
-                    this.setLoading(false);
+                    this.handlePlayError(error, title);
                 });
+        }
+    },
+
+    /**
+     * Update player UI elements
+     * @private
+     */
+    updatePlayerUI(title, artist, thumbnail) {
+        const defaultThumb = '/static/images/default-album.png';
+
+        const thumbEl = document.getElementById('playerThumb');
+        const titleEl = document.getElementById('playerTitle');
+        const artistEl = document.getElementById('playerArtist');
+
+        if (thumbEl) {
+            thumbEl.src = thumbnail || defaultThumb;
+            thumbEl.onerror = function() {
+                this.onerror = null;
+                this.src = defaultThumb;
+            };
+        }
+        if (titleEl) titleEl.textContent = title || 'Unknown Title';
+        if (artistEl) artistEl.textContent = artist || 'Unknown Artist';
+    },
+
+    /**
+     * Handle play errors intelligently
+     * @private
+     */
+    handlePlayError(error, title) {
+        this.setLoading(false);
+
+        // Errors to ignore (not real playback failures)
+        const ignoredErrors = ['AbortError', 'NotAllowedError'];
+
+        if (ignoredErrors.includes(error.name)) {
+            console.log(`ℹ️ Play interrupted (${error.name}):`, title || 'track');
+            return;
+        }
+
+        // Real errors - show to user
+        console.error('❌ Playback error:', error);
+
+        const errorMessages = {
+            'NotSupportedError': 'Audio format not supported',
+            'NetworkError': 'Network error - check connection',
+            'MediaError': 'Error loading audio file'
+        };
+
+        const message = errorMessages[error.name] || 'Error playing audio';
+
+        if (typeof UI !== 'undefined' && UI.toast) {
+            UI.toast(message, 'error');
+        } else {
+            alert(message);
         }
     },
 
@@ -451,25 +212,17 @@ const Player = {
      * Toggle play/pause
      */
     toggle() {
-        if (!this.audio || !this.audio.src) return;
+        if (!this.audio) return;
 
         if (this.audio.paused) {
-            this.audio.play().then(() => {
-                this.updatePlayButton(true);
-            }).catch(e => {
-                if (e.name !== 'AbortError') {
-                    console.error('Play error:', e);
-                    this.showToast('Playback failed', 'error');
-                }
+            this.audio.play().catch((error) => {
+                this.handlePlayError(error, this.currentTrack?.title);
             });
-            // Optimistic update
-            this.updatePlayButton(true);
         } else {
             this.audio.pause();
-            this.updatePlayButton(false);
-            this.showToast('Paused', 'info');
         }
     },
+    
 
     /**
      * Pause playback
@@ -485,76 +238,156 @@ const Player = {
      */
     resume() {
         if (this.audio && this.audio.src) {
-            this.audio.play().catch(e => console.log('Resume interrupted'));
+            this.audio.play().catch((error) => {
+                this.handlePlayError(error, this.currentTrack?.title);
+            });
         }
     },
 
     /**
-     * Stop playback
+     * Stop playback and reset
      */
     stop() {
         if (!this.audio) return;
-        this.saveCurrentPosition();
+
         this.audio.pause();
         this.audio.currentTime = 0;
-        this.updatePlayButton(false);
+        this.updateButton(false);
         this.currentTrack = null;
-        this.clearSleepTimer();
     },
 
     /**
-     * Skip forward
+     * Update play/pause button icon
+     * @param {boolean} isPlaying - Current play state
+     */
+    updateButton(isPlaying) {
+        const btn = document.getElementById('playPauseBtn');
+        if (btn) {
+            btn.innerHTML = isPlaying
+                ? '<i class="fas fa-pause"></i>'
+                : '<i class="fas fa-play"></i>';
+            btn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+        }
+    },
+
+    /**
+     * Update progress bar and time display
+     */
+    updateProgress() {
+        if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+
+        const percent = (this.audio.currentTime / this.audio.duration) * 100;
+
+        const progress = document.getElementById('playerProgress');
+        if (progress) {
+            progress.style.width = `${percent}%`;
+        }
+
+        const timeEl = document.getElementById('playerTime');
+        if (timeEl) {
+            timeEl.textContent = this.formatTime(this.audio.currentTime);
+        }
+    },
+
+    /**
+     * Update duration display
+     */
+    updateDuration() {
+        const durationEl = document.getElementById('playerDuration');
+        if (durationEl && this.audio && !isNaN(this.audio.duration)) {
+            durationEl.textContent = this.formatTime(this.audio.duration);
+        }
+    },
+
+    /**
+     * Format seconds to MM:SS
+     * @param {number} seconds - Time in seconds
+     * @returns {string} Formatted time string
+     */
+    formatTime(seconds) {
+        if (isNaN(seconds) || seconds < 0) return '0:00';
+
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    },
+
+    /**
+     * Seek to position (supports mouse and touch)
+     * @param {Event} event - Click or touch event
+     */
+    seek(event) {
+        if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+
+        const bar = document.getElementById('playerProgressBar');
+        if (!bar) return;
+
+        const rect = bar.getBoundingClientRect();
+
+        // Support both mouse and touch events
+        const clientX = event.touches 
+            ? event.touches[0].clientX 
+            : event.clientX;
+
+        const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        this.audio.currentTime = percent * this.audio.duration;
+    },
+
+    /**
+     * Skip forward by seconds
+     * @param {number} seconds - Seconds to skip (default: 10)
      */
     skipForward(seconds = 10) {
         if (!this.audio || isNaN(this.audio.duration)) return;
-        this.audio.currentTime = Math.min(this.audio.duration - 0.1, this.audio.currentTime + seconds);
-        this.showSkipIndicator(`+${seconds}s`);
+        this.audio.currentTime = Math.min(this.audio.duration, this.audio.currentTime + seconds);
     },
 
     /**
-     * Skip backward
+     * Skip backward by seconds
+     * @param {number} seconds - Seconds to skip (default: 10)
      */
     skipBackward(seconds = 10) {
         if (!this.audio) return;
         this.audio.currentTime = Math.max(0, this.audio.currentTime - seconds);
-        this.showSkipIndicator(`-${seconds}s`);
     },
 
     /**
-     * Seek to specific time
-     */
-    seek(event) {
-        // This is called from onclick on progress bar
-        event.stopPropagation();
-        this.seekToPosition(event);
-    },
-
-    // ==================== VOLUME CONTROLS ====================
-
-    /**
-     * Set volume (0-1)
+     * Set volume
+     * @param {number} value - Volume level (0 to 1)
      */
     setVolume(value) {
         if (!this.audio) return;
         this.audio.volume = Math.max(0, Math.min(1, value));
 
-        const slider = document.getElementById('volumeSlider');
-        if (slider) {
-            slider.value = this.audio.volume * 100;
-        }
+        // Update volume icon
+        this.updateVolumeIcon();
+        
+        // Sync all volume sliders
+        this.syncVolumeSliders();
+        
+        // Save volume setting
+        this.saveSettings();
     },
-
+    
     /**
-     * Adjust volume by delta
+     * Sync all volume sliders
      */
-    adjustVolume(delta) {
-        if (!this.audio) return;
-        this.setVolume(this.audio.volume + delta);
-        this.showToast(`Volume: ${Math.round(this.audio.volume * 100)}%`, 'info');
+    syncVolumeSliders() {
+        const volumePercent = Math.round((this.audio?.volume || 1) * 100);
+        
+        const sliders = [
+            document.getElementById('volumeSlider'),
+            document.getElementById('nowPlayingVolume')
+        ];
+        
+        sliders.forEach(slider => {
+            if (slider) slider.value = volumePercent;
+        });
     },
 
     /**
      * Get current volume
+     * @returns {number} Current volume (0 to 1)
      */
     getVolume() {
         return this.audio ? this.audio.volume : 1;
@@ -565,16 +398,18 @@ const Player = {
      */
     toggleMute() {
         if (!this.audio) return;
+
         this.audio.muted = !this.audio.muted;
         this.updateVolumeIcon();
     },
 
     /**
-     * Update volume icon
+     * Update volume icon based on state
+     * @private
      */
     updateVolumeIcon() {
         const icon = document.getElementById('volumeIcon');
-        if (!icon || !this.audio) return;
+        if (!icon) return;
 
         if (this.audio.muted || this.audio.volume === 0) {
             icon.className = 'fas fa-volume-mute';
@@ -586,233 +421,15 @@ const Player = {
     },
 
     /**
-     * Save volume to localStorage
-     */
-    saveVolume() {
-        if (this.audio) {
-            try {
-                localStorage.setItem('zora_volume', this.audio.volume.toString());
-            } catch (e) { }
-        }
-    },
-
-    /**
-     * Load saved volume
-     */
-    loadSavedVolume() {
-        try {
-            const saved = localStorage.getItem('zora_volume');
-            if (saved !== null && this.audio) {
-                this.audio.volume = parseFloat(saved);
-                const slider = document.getElementById('volumeSlider');
-                if (slider) {
-                    slider.value = this.audio.volume * 100;
-                }
-            }
-        } catch (e) { }
-    },
-
-    // ==================== PLAYBACK SPEED ====================
-
-    /**
-     * Set playback rate
-     */
-    setPlaybackRate(rate) {
-        if (!this.audio) return;
-        this.playbackRate = Math.max(0.25, Math.min(3.0, rate));
-        this.audio.playbackRate = this.playbackRate;
-
-        const speedEl = document.getElementById('playbackSpeed');
-        if (speedEl) {
-            speedEl.textContent = `${this.playbackRate}x`;
-        }
-
-        this.showToast(`Speed: ${this.playbackRate}x`, 'info');
-    },
-
-    /**
-     * Cycle through playback rates
-     */
-    cyclePlaybackRate() {
-        const rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-        const currentIndex = rates.indexOf(this.playbackRate);
-        const nextIndex = currentIndex === -1 ? 2 : (currentIndex + 1) % rates.length;
-        this.setPlaybackRate(rates[nextIndex]);
-    },
-
-    // ==================== SLEEP TIMER ====================
-
-    /**
-     * Set sleep timer
-     */
-    setSleepTimer(minutes) {
-        this.clearSleepTimer();
-
-        if (minutes <= 0) {
-            this.showToast('Sleep timer cancelled', 'info');
-            this.updateSleepTimerDisplay(0);
-            return;
-        }
-
-        this.sleepTimerEnd = Date.now() + (minutes * 60 * 1000);
-        this.sleepTimer = setTimeout(() => {
-            this.pause();
-            this.showToast('Sleep timer ended', 'info');
-            this.sleepTimerEnd = null;
-            this.updateSleepTimerDisplay(0);
-        }, minutes * 60 * 1000);
-
-        this.showToast(`Sleep timer: ${minutes} minutes`, 'info');
-    },
-
-    /**
-     * Clear sleep timer
-     */
-    clearSleepTimer() {
-        if (this.sleepTimer) {
-            clearTimeout(this.sleepTimer);
-            this.sleepTimer = null;
-            this.sleepTimerEnd = null;
-        }
-    },
-
-    /**
-     * Check and update sleep timer
-     */
-    checkSleepTimer() {
-        if (this.sleepTimerEnd) {
-            const remaining = Math.max(0, this.sleepTimerEnd - Date.now());
-            this.updateSleepTimerDisplay(remaining);
-        }
-    },
-
-    /**
-     * Update sleep timer display
-     */
-    updateSleepTimerDisplay(remaining) {
-        const display = document.getElementById('sleepTimerDisplay');
-        if (!display) return;
-
-        if (remaining > 0) {
-            const mins = Math.ceil(remaining / 60000);
-            display.textContent = `${mins}m`;
-            display.style.display = 'inline';
-        } else {
-            display.style.display = 'none';
-        }
-    },
-
-    // ==================== UI UPDATES ====================
-
-    /**
-     * Update play/pause button
-     */
-    updatePlayButton(isPlaying) {
-        const btn = document.getElementById('playPauseBtn');
-        if (!btn) return;
-
-        // Force icon update
-        const icon = btn.querySelector('i');
-        if (icon) {
-            icon.className = isPlaying ? 'fas fa-pause' : 'fas fa-play';
-        } else {
-            // Fallback if icon is missing
-            btn.innerHTML = isPlaying
-                ? '<i class="fas fa-pause"></i>'
-                : '<i class="fas fa-play"></i>';
-        }
-
-        btn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
-
-        if (isPlaying) {
-            btn.classList.add('is-playing');
-        } else {
-            btn.classList.remove('is-playing');
-        }
-    },
-
-    /**
-     * Update progress bar
-     */
-    updateProgressBar() {
-        if (!this.audio || !this.progressFill || isNaN(this.audio.duration)) return;
-        const percent = (this.audio.currentTime / this.audio.duration) * 100;
-        this.progressFill.style.width = `${percent}%`;
-
-        // Update handle position
-        const handle = document.getElementById('playerHandle');
-        if (handle) {
-            handle.style.left = `${percent}%`;
-        }
-    },
-
-    /**
-     * Update time display
-     */
-    updateTimeDisplay() {
-        if (!this.audio) return;
-
-        const timeEl = document.getElementById('playerTime');
-        if (timeEl) {
-            timeEl.textContent = this.formatTime(this.audio.currentTime);
-        }
-
-        const remainingEl = document.getElementById('playerRemaining');
-        if (remainingEl && !isNaN(this.audio.duration)) {
-            const remaining = this.audio.duration - this.audio.currentTime;
-            remainingEl.textContent = `-${this.formatTime(remaining)}`;
-        }
-    },
-
-    /**
-     * Update duration display
-     */
-    updateDurationDisplay() {
-        const durationEl = document.getElementById('playerDuration');
-        if (durationEl && this.audio && !isNaN(this.audio.duration)) {
-            durationEl.textContent = this.formatTime(this.audio.duration);
-        }
-    },
-
-    /**
-     * Update track info display
-     */
-    updateTrackInfo(title, artist, thumbnail) {
-        const defaultThumb = '/static/images/default-album.png';
-
-        const thumbEl = document.getElementById('playerThumb');
-        const titleEl = document.getElementById('playerTitle');
-        const artistEl = document.getElementById('playerArtist');
-
-        if (thumbEl) thumbEl.src = thumbnail || defaultThumb;
-        if (titleEl) titleEl.textContent = title || 'Unknown Title';
-        if (artistEl) artistEl.textContent = artist || 'Unknown Artist';
-
-        // Update page title
-        if (title) {
-            document.title = `${title} - Zora`;
-        }
-    },
-
-    /**
-     * Show player bar
-     */
-    showPlayer() {
-        const playerBar = document.getElementById('playerBar');
-        if (playerBar) {
-            playerBar.classList.remove('hidden');
-        }
-    },
-
-    /**
      * Set loading state
+     * @param {boolean} loading - Loading state
      */
     setLoading(loading) {
         this.isLoading = loading;
 
         const loader = document.getElementById('playerLoading');
         if (loader) {
-            loader.style.display = loading ? 'flex' : 'none';
+            loader.style.display = loading ? 'block' : 'none';
         }
 
         const playBtn = document.getElementById('playPauseBtn');
@@ -820,211 +437,607 @@ const Player = {
             if (loading) {
                 playBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
             } else {
-                this.updatePlayButton(!this.audio?.paused);
+                this.updateButton(!this.audio?.paused);
             }
         }
     },
-
-    /**
-     * Show skip indicator
-     */
-    showSkipIndicator(text) {
-        let indicator = document.getElementById('skipIndicator');
-        if (!indicator) {
-            indicator = document.createElement('div');
-            indicator.id = 'skipIndicator';
-            indicator.className = 'skip-indicator';
-            document.body.appendChild(indicator);
-        }
-        indicator.textContent = text;
-        indicator.classList.add('show');
-        setTimeout(() => indicator.classList.remove('show'), 600);
-    },
-
-    /**
-     * Show toast notification
-     */
-    showToast(message, type = 'info') {
-        if (typeof UI !== 'undefined' && UI.toast) {
-            UI.toast(message, type);
-            return;
-        }
-
-        let container = document.getElementById('toastContainer');
-        if (!container) {
-            container = document.createElement('div');
-            container.id = 'toastContainer';
-            container.className = 'toast-container';
-            document.body.appendChild(container);
-        }
-
-        const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
-        toast.textContent = message;
-        container.appendChild(toast);
-
-        setTimeout(() => {
-            toast.classList.add('fade-out');
-            setTimeout(() => toast.remove(), 300);
-        }, 2500);
-    },
-
-    // ==================== POSITION SAVING ====================
-
-    /**
-     * Save current position
-     */
-    saveCurrentPosition() {
-        if (!this.currentTrack || !this.audio || isNaN(this.audio.currentTime)) return;
-
-        const key = this.currentTrack.filename;
-        if (this.audio.currentTime > 10 && this.audio.currentTime < this.audio.duration - 10) {
-            this.savedPositions[key] = {
-                time: this.audio.currentTime,
-                timestamp: Date.now()
-            };
-            this.persistPositions();
-        }
-    },
-
-    /**
-     * Restore saved position
-     */
-    restorePosition() {
-        if (!this.currentTrack || !this.audio) return;
-
-        const saved = this.savedPositions[this.currentTrack.filename];
-        if (saved && Date.now() - saved.timestamp < 7 * 24 * 60 * 60 * 1000) {
-            this.audio.currentTime = saved.time;
-            this.showToast('Resuming playback', 'info');
-        }
-    },
-
-    /**
-     * Clear saved position
-     */
-    clearSavedPosition() {
-        if (this.currentTrack) {
-            delete this.savedPositions[this.currentTrack.filename];
-            this.persistPositions();
-        }
-    },
-
-    /**
-     * Load positions from localStorage
-     */
-    loadSavedPositions() {
-        try {
-            const saved = localStorage.getItem('zora_positions');
-            if (saved) {
-                this.savedPositions = JSON.parse(saved);
-            }
-        } catch (e) { }
-    },
-
-    /**
-     * Persist positions to localStorage
-     */
-    persistPositions() {
-        try {
-            localStorage.setItem('zora_positions', JSON.stringify(this.savedPositions));
-        } catch (e) { }
-    },
-
-    // ==================== EVENT HANDLERS ====================
 
     /**
      * Handle track ended
+     * @private
      */
-    onTrackEnded() {
-        this.updatePlayButton(false);
-        this.clearSavedPosition();
+    onEnded() {
+        // Handle repeat modes
+        if (this.repeat === 'one') {
+            this.audio.currentTime = 0;
+            this.audio.play().catch(e => console.log('Repeat play interrupted'));
+            return;
+        }
+        
+        this.updateButton(false);
 
-        if (this.progressFill) {
-            this.progressFill.style.width = '0%';
+        // Reset progress
+        const progress = document.getElementById('playerProgress');
+        if (progress) {
+            progress.style.width = '0%';
         }
 
-        if (typeof Playlist !== 'undefined' && Playlist.playNext) {
-            Playlist.playNext();
+        // Play next track from library
+        if (typeof window.playNextTrack === 'function') {
+            window.playNextTrack();
         }
     },
 
     /**
      * Handle audio errors
+     * @private
      */
-    handleError(e) {
+    onError(e) {
         this.setLoading(false);
-        this.updatePlayButton(false);
+        this.updateButton(false);
 
         const error = this.audio?.error;
         let message = 'Error loading audio';
 
         if (error) {
-            const messages = {
+            const errorCodes = {
                 1: 'Audio loading aborted',
                 2: 'Network error',
                 3: 'Audio decoding failed',
                 4: 'Audio format not supported'
             };
-            message = messages[error.code] || message;
+            message = errorCodes[error.code] || message;
         }
 
-        console.error('Audio error:', message);
-        this.showToast(message, 'error');
-    },
+        console.error('❌ Audio error:', message, e);
 
-    // ==================== UTILITIES ====================
-
-    /**
-     * Format time as MM:SS or HH:MM:SS
-     */
-    formatTime(seconds) {
-        if (isNaN(seconds) || seconds < 0) return '0:00';
-
-        const hrs = Math.floor(seconds / 3600);
-        const mins = Math.floor((seconds % 3600) / 60);
-        const secs = Math.floor(seconds % 60);
-
-        if (hrs > 0) {
-            return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        if (typeof UI !== 'undefined' && UI.toast) {
+            UI.toast(message, 'error');
         }
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
     },
 
     /**
-     * Get current track
+     * Get current track info
+     * @returns {Object|null} Current track object
      */
     getCurrentTrack() {
         return this.currentTrack;
     },
 
     /**
-     * Check if playing
+     * Check if audio is playing
+     * @returns {boolean} Playing state
      */
     isPlaying() {
         return this.audio ? !this.audio.paused : false;
     },
 
     /**
-     * Get current time
+     * Get current playback time
+     * @returns {number} Current time in seconds
      */
     getCurrentTime() {
         return this.audio ? this.audio.currentTime : 0;
     },
 
     /**
-     * Get duration
+     * Get total duration
+     * @returns {number} Duration in seconds
      */
     getDuration() {
         return this.audio && !isNaN(this.audio.duration) ? this.audio.duration : 0;
     },
 
     /**
-     * Get progress percentage
+     * Get playback progress percentage
+     * @returns {number} Progress (0 to 100)
      */
     getProgress() {
         if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return 0;
         return (this.audio.currentTime / this.audio.duration) * 100;
+    },
+
+    /**
+     * Setup all control buttons
+     */
+    setupControls() {
+        // Play/Pause button
+        const playBtn = document.getElementById('playPauseBtn');
+        if (playBtn) {
+            playBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggle();
+            });
+        }
+
+        // Skip buttons
+        document.getElementById('btnSkipBack')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.skipBackward(10);
+        });
+        
+        document.getElementById('btnSkipForward')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.skipForward(10);
+        });
+
+        // Mute button
+        document.getElementById('btnMute')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleMute();
+        });
+
+        // Volume slider (desktop)
+        const volumeSlider = document.getElementById('volumeSlider');
+        if (volumeSlider) {
+            volumeSlider.addEventListener('input', (e) => {
+                this.setVolume(e.target.value / 100);
+            });
+        }
+
+        // Shuffle button
+        document.getElementById('btnShuffle')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleShuffle();
+        });
+
+        // Repeat button
+        document.getElementById('btnRepeat')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.cycleRepeat();
+        });
+
+        // Sleep timer button
+        document.getElementById('btnSleepTimer')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.showSleepTimerMenu();
+        });
+
+        // Now Playing panel toggle
+        document.getElementById('btnMobileControls')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.openNowPlaying();
+        });
+        
+        // Now Playing close button
+        document.getElementById('btnCloseNowPlaying')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.closeNowPlaying();
+        });
+        
+        // Now Playing controls
+        document.getElementById('btnPlayPauseNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggle();
+        });
+        
+        document.getElementById('btnSkipBackNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.skipBackward(10);
+        });
+        
+        document.getElementById('btnSkipForwardNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.skipForward(10);
+        });
+        
+        document.getElementById('btnShuffleNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleShuffle();
+        });
+        
+        document.getElementById('btnRepeatNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.cycleRepeat();
+        });
+        
+        document.getElementById('btnSleepTimerNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.showSleepTimerMenu();
+        });
+        
+        // Now Playing volume
+        const npVolume = document.getElementById('nowPlayingVolume');
+        if (npVolume) {
+            npVolume.addEventListener('input', (e) => {
+                this.setVolume(e.target.value / 100);
+            });
+        }
+        
+        // Now Playing progress bar
+        const npProgressBar = document.getElementById('nowPlayingProgressBar');
+        if (npProgressBar) {
+            npProgressBar.addEventListener('click', (e) => this.seekFromNowPlaying(e));
+            npProgressBar.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                this.seekFromNowPlaying(e);
+            }, { passive: false });
+        }
+
+        // Progress bar seeking
+        const progressBar = document.getElementById('playerProgressBar');
+        if (progressBar) {
+            progressBar.addEventListener('click', (e) => this.seek(e));
+            progressBar.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                this.seek(e);
+            }, { passive: false });
+        }
+    },
+
+    /**
+     * Load saved settings
+     */
+    loadSettings() {
+        try {
+            this.shuffle = localStorage.getItem('player_shuffle') === 'true';
+            this.repeat = localStorage.getItem('player_repeat') || 'off';
+            
+            const savedVol = parseFloat(localStorage.getItem('player_volume'));
+            this.savedVolume = Number.isFinite(savedVol) ? savedVol : 1;
+            
+            if (this.audio) {
+                this.audio.volume = this.savedVolume;
+            }
+            
+            // Sync volume sliders
+            this.syncVolumeSliders();
+            
+            this.updateShuffleButton();
+            this.updateRepeatButton();
+            this.updateNowPlayingButtons();
+        } catch (e) {
+            console.warn('Could not load player settings');
+        }
+    },
+
+    /**
+     * Save settings
+     */
+    saveSettings() {
+        try {
+            localStorage.setItem('player_shuffle', String(this.shuffle));
+            localStorage.setItem('player_repeat', this.repeat);
+            const vol = this.audio ? this.audio.volume : 1;
+            localStorage.setItem('player_volume', String(vol));
+        } catch (e) {
+            console.warn('Could not save player settings');
+        }
+    },
+
+    /**
+     * Toggle shuffle mode
+     */
+    toggleShuffle() {
+        this.shuffle = !this.shuffle;
+        this.updateShuffleButton();
+        this.updateNowPlayingButtons();
+        this.saveSettings();
+        this.showToast(this.shuffle ? 'Shuffle on' : 'Shuffle off');
+    },
+
+    /**
+     * Update shuffle button UI
+     */
+    updateShuffleButton() {
+        const btn = document.getElementById('btnShuffle');
+        if (btn) {
+            btn.classList.toggle('active', this.shuffle);
+            const label = btn.querySelector('span');
+            if (label) {
+                label.textContent = this.shuffle ? 'Shuffle On' : 'Shuffle';
+            }
+        }
+    },
+
+    /**
+     * Cycle through repeat modes
+     */
+    cycleRepeat() {
+        const modes = ['off', 'all', 'one'];
+        const currentIndex = modes.indexOf(this.repeat);
+        this.repeat = modes[(currentIndex + 1) % modes.length];
+        this.updateRepeatButton();
+        this.updateNowPlayingButtons();
+        this.saveSettings();
+        
+        const messages = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
+        this.showToast(messages[this.repeat]);
+    },
+
+    /**
+     * Update repeat button UI
+     */
+    updateRepeatButton() {
+        const btn = document.getElementById('btnRepeat');
+        if (!btn) return;
+        
+        btn.classList.remove('active', 'repeat-one');
+        
+        // Find or create the icon and label
+        let icon = btn.querySelector('i');
+        let label = btn.querySelector('span:not(.repeat-badge)');
+        
+        if (this.repeat === 'all') {
+            btn.classList.add('active');
+            if (icon) icon.className = 'fas fa-repeat';
+            if (label) label.textContent = 'Repeat All';
+        } else if (this.repeat === 'one') {
+            btn.classList.add('active', 'repeat-one');
+            if (icon) icon.className = 'fas fa-repeat';
+            if (label) label.textContent = 'Repeat 1';
+        } else {
+            if (icon) icon.className = 'fas fa-repeat';
+            if (label) label.textContent = 'Repeat';
+        }
+    },
+
+    /**
+     * Show sleep timer menu
+     */
+    showSleepTimerMenu() {
+        const existing = document.getElementById('sleepTimerMenu');
+        if (existing) {
+            existing.remove();
+            return;
+        }
+
+        const menu = document.createElement('div');
+        menu.id = 'sleepTimerMenu';
+        menu.className = 'sleep-timer-menu';
+        menu.innerHTML = `
+            <div class="sleep-timer-menu__content">
+                <div class="sleep-timer-menu__header">
+                    <span>Sleep Timer</span>
+                    <button class="sleep-timer-menu__close" onclick="Player.closeSleepTimerMenu()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="sleep-timer-menu__options">
+                    <button onclick="Player.setSleepTimer(5)">5 min</button>
+                    <button onclick="Player.setSleepTimer(10)">10 min</button>
+                    <button onclick="Player.setSleepTimer(15)">15 min</button>
+                    <button onclick="Player.setSleepTimer(30)">30 min</button>
+                    <button onclick="Player.setSleepTimer(45)">45 min</button>
+                    <button onclick="Player.setSleepTimer(60)">1 hour</button>
+                    ${this.sleepTimer ? '<button class="cancel" onclick="Player.cancelSleepTimer()">Cancel Timer</button>' : ''}
+                </div>
+                ${this.sleepTimerEnd ? `<div class="sleep-timer-menu__status">Timer ends at ${new Date(this.sleepTimerEnd).toLocaleTimeString()}</div>` : ''}
+            </div>
+        `;
+        
+        document.body.appendChild(menu);
+        
+        // Close on outside click (with proper cleanup)
+        if (!this._sleepOutsideClickHandler) {
+            this._sleepOutsideClickHandler = (e) => {
+                const m = document.getElementById('sleepTimerMenu');
+                if (m && !m.contains(e.target) && !e.target.closest('#btnSleepTimer')) {
+                    Player.closeSleepTimerMenu();
+                }
+            };
+        }
+        
+        if (this._sleepOutsideClickTimeout) {
+            clearTimeout(this._sleepOutsideClickTimeout);
+        }
+        
+        this._sleepOutsideClickTimeout = setTimeout(() => {
+            document.addEventListener('click', this._sleepOutsideClickHandler);
+            this._sleepOutsideClickTimeout = null;
+        }, 100);
+    },
+
+    closeSleepTimerMenu() {
+        const menu = document.getElementById('sleepTimerMenu');
+        if (menu) menu.remove();
+        
+        if (this._sleepOutsideClickTimeout) {
+            clearTimeout(this._sleepOutsideClickTimeout);
+            this._sleepOutsideClickTimeout = null;
+        }
+        
+        if (this._sleepOutsideClickHandler) {
+            document.removeEventListener('click', this._sleepOutsideClickHandler);
+        }
+    },
+
+    /**
+     * Set sleep timer
+     */
+    setSleepTimer(minutes) {
+        if (!minutes || minutes <= 0) {
+            this.cancelSleepTimer();
+            return;
+        }
+        
+        this.cancelSleepTimer();
+        
+        this.sleepTimerEnd = Date.now() + (minutes * 60 * 1000);
+        
+        this.sleepTimer = setTimeout(() => {
+            this.pause();
+            this.showToast('Sleep timer ended');
+            this.sleepTimer = null;
+            this.sleepTimerEnd = null;
+            this.updateSleepTimerDisplay();
+        }, minutes * 60 * 1000);
+        
+        this.updateSleepTimerDisplay();
+        this.closeSleepTimerMenu();
+        this.showToast(`Sleep timer set for ${minutes} minutes`);
+    },
+
+    /**
+     * Cancel sleep timer
+     */
+    cancelSleepTimer() {
+        if (this.sleepTimer) {
+            clearTimeout(this.sleepTimer);
+            this.sleepTimer = null;
+            this.sleepTimerEnd = null;
+            this.updateSleepTimerDisplay();
+            this.showToast('Sleep timer cancelled');
+        }
+        this.closeSleepTimerMenu();
+    },
+
+    /**
+     * Update sleep timer display
+     */
+    updateSleepTimerDisplay() {
+        const display = document.getElementById('sleepTimerDisplay');
+        const btn = document.getElementById('btnSleepTimer');
+        
+        if (this.sleepTimerEnd) {
+            const remaining = Math.max(0, Math.ceil((this.sleepTimerEnd - Date.now()) / 60000));
+            if (display) display.textContent = `${remaining}m`;
+            if (btn) btn.classList.add('active');
+        } else {
+            if (display) display.textContent = '';
+            if (btn) btn.classList.remove('active');
+        }
+    },
+
+    /**
+     * Open Now Playing panel
+     */
+    openNowPlaying() {
+        const panel = document.getElementById('nowPlayingPanel');
+        if (!panel) return;
+        
+        // Sync current track info
+        this.syncNowPlayingUI();
+        
+        // Open panel
+        panel.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    },
+    
+    /**
+     * Close Now Playing panel
+     */
+    closeNowPlaying() {
+        const panel = document.getElementById('nowPlayingPanel');
+        if (panel) {
+            panel.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+    },
+    
+    /**
+     * Sync Now Playing UI with current state
+     */
+    syncNowPlayingUI() {
+        const track = this.currentTrack;
+        const defaultThumb = '/static/images/default-album.png';
+        
+        // Track info
+        const thumb = document.getElementById('nowPlayingThumb');
+        const title = document.getElementById('nowPlayingTitle');
+        const artist = document.getElementById('nowPlayingArtist');
+        
+        if (thumb) thumb.src = track?.thumbnail || defaultThumb;
+        if (title) title.textContent = track?.title || 'Not Playing';
+        if (artist) artist.textContent = track?.artist || '—';
+        
+        // Volume
+        const volumeSlider = document.getElementById('nowPlayingVolume');
+        if (volumeSlider && this.audio) {
+            volumeSlider.value = Math.round(this.audio.volume * 100);
+        }
+        
+        // Update button states
+        this.updateNowPlayingButtons();
+    },
+    
+    /**
+     * Update Now Playing button states
+     */
+    updateNowPlayingButtons() {
+        // Play/Pause button
+        const playBtn = document.getElementById('btnPlayPauseNP');
+        if (playBtn) {
+            const isPlaying = this.audio && !this.audio.paused;
+            playBtn.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
+        }
+        
+        // Shuffle button
+        const shuffleBtn = document.getElementById('btnShuffleNP');
+        if (shuffleBtn) {
+            shuffleBtn.classList.toggle('active', this.shuffle);
+        }
+        
+        // Repeat button
+        const repeatBtn = document.getElementById('btnRepeatNP');
+        if (repeatBtn) {
+            repeatBtn.classList.toggle('active', this.repeat !== 'off');
+            if (this.repeat === 'one') {
+                repeatBtn.innerHTML = '<i class="fas fa-repeat"></i><span class="np-repeat-one">1</span>';
+            } else {
+                repeatBtn.innerHTML = '<i class="fas fa-repeat"></i>';
+            }
+        }
+    },
+    
+    /**
+     * Update Now Playing progress
+     */
+    updateNowPlayingProgress() {
+        if (!this.audio || isNaN(this.audio.duration)) return;
+        
+        const percent = (this.audio.currentTime / this.audio.duration) * 100;
+        
+        const fill = document.getElementById('nowPlayingProgress');
+        if (fill) fill.style.width = `${percent}%`;
+        
+        const timeEl = document.getElementById('nowPlayingTime');
+        if (timeEl) timeEl.textContent = this.formatTime(this.audio.currentTime);
+        
+        const durationEl = document.getElementById('nowPlayingDuration');
+        if (durationEl) durationEl.textContent = this.formatTime(this.audio.duration);
+    },
+    
+    /**
+     * Seek from Now Playing progress bar
+     */
+    seekFromNowPlaying(event) {
+        if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+        
+        const bar = document.getElementById('nowPlayingProgressBar');
+        if (!bar) return;
+        
+        const rect = bar.getBoundingClientRect();
+        const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+        const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        
+        this.audio.currentTime = percent * this.audio.duration;
+        this.updateNowPlayingProgress();
+    },
+
+    /**
+     * Show toast notification
+     */
+    showToast(message) {
+        // Simple compact toast
+        const existing = document.querySelector('.player-toast');
+        if (existing) existing.remove();
+        
+        const toast = document.createElement('div');
+        toast.className = 'player-toast';
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        
+        // Quick show/hide for snappy feedback
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+        
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 250);
+        }, 1500);
     }
 };
 

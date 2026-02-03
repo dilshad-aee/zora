@@ -372,6 +372,11 @@
                     <button type="button" class="player__btn player__btn--skip" id="btnSkipForward" title="Forward 10s">
                         <i class="fas fa-forward"></i>
                     </button>
+                    
+                    <!-- Mobile More Button -->
+                    <button type="button" class="player__btn player__btn--more" id="btnMobileControls" title="More Controls">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
                 </div>
                 
                 <!-- Progress Section -->
@@ -430,6 +435,51 @@
                 <span class="mobile-nav__badge" id="mobileQueueBadge" style="display: none;">0</span>
             </a>
         </nav>
+    </div>
+    
+    <!-- Now Playing Panel (Spotify-style) -->
+    <div class="now-playing" id="nowPlayingPanel">
+        <div class="now-playing__header">
+            <button type="button" class="now-playing__close" id="btnCloseNowPlaying">
+                <i class="fas fa-chevron-down"></i>
+            </button>
+            <span class="now-playing__label">Now Playing</span>
+            <div class="now-playing__spacer"></div>
+        </div>
+        <div class="now-playing__artwork">
+            <img id="nowPlayingThumb" src="/static/images/default-album.png" alt="">
+        </div>
+        <div class="now-playing__info">
+            <div class="now-playing__title" id="nowPlayingTitle">Not Playing</div>
+            <div class="now-playing__artist" id="nowPlayingArtist">—</div>
+        </div>
+        <div class="now-playing__progress">
+            <div class="now-playing__progress-bar" id="nowPlayingProgressBar">
+                <div class="now-playing__progress-fill" id="nowPlayingProgress"></div>
+            </div>
+            <div class="now-playing__times">
+                <span id="nowPlayingTime">0:00</span>
+                <span id="nowPlayingDuration">0:00</span>
+            </div>
+        </div>
+        <div class="now-playing__controls">
+            <button type="button" class="now-playing__btn" id="btnShuffleNP"><i class="fas fa-random"></i></button>
+            <button type="button" class="now-playing__btn now-playing__btn--skip" id="btnSkipBackNP"><i class="fas fa-step-backward"></i></button>
+            <button type="button" class="now-playing__btn now-playing__btn--play" id="btnPlayPauseNP"><i class="fas fa-play"></i></button>
+            <button type="button" class="now-playing__btn now-playing__btn--skip" id="btnSkipForwardNP"><i class="fas fa-step-forward"></i></button>
+            <button type="button" class="now-playing__btn" id="btnRepeatNP"><i class="fas fa-repeat"></i></button>
+        </div>
+        <div class="now-playing__extras">
+            <div class="now-playing__volume">
+                <i class="fas fa-volume-down"></i>
+                <input type="range" class="now-playing__slider" id="nowPlayingVolume" min="0" max="100" value="100">
+                <i class="fas fa-volume-up"></i>
+            </div>
+            <button type="button" class="now-playing__extra-btn" id="btnSleepTimerNP">
+                <i class="fas fa-moon"></i>
+                <span>Sleep Timer</span>
+            </button>
+        </div>
     </div>
     
     <!-- Settings Modal -->
@@ -643,15 +693,19 @@
             document.getElementById('offlineBanner').style.display = 'flex';
         }
         
-        // Prevent zoom on double tap for iOS
+        // Prevent zoom on double tap for iOS (but allow interactive elements)
         let lastTouchEnd = 0;
         document.addEventListener('touchend', (event) => {
+            // Skip for interactive elements to avoid breaking button/input behavior
+            if (event.target.closest('input, textarea, button, a, select, [onclick]')) {
+                return;
+            }
             const now = Date.now();
             if (now - lastTouchEnd <= 300) {
                 event.preventDefault();
             }
             lastTouchEnd = now;
-        }, false);
+        }, { passive: false });
         
         // Handle safe area insets for notched devices
         function updateSafeAreas() {
