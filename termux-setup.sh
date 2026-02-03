@@ -16,13 +16,35 @@ set -euo pipefail
 #   USE_SUBMODULES="0"   # set to 1 if your repo uses submodules
 
 SERVICE_NAME="${SERVICE_NAME:-zora}"
-APP_DIR="${APP_DIR:-$HOME/zora}"
 REPO_URL="${REPO_URL:-}"
 START_CMD="${START_CMD:-./venv/bin/python run.py}"
 UPDATE_SCRIPT="${UPDATE_SCRIPT:-$HOME/update-zora.sh}"
 JOB_ID="${JOB_ID:-1}"
 PERIOD_MS="${PERIOD_MS:-300000}"
 USE_SUBMODULES="${USE_SUBMODULES:-0}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="${APP_DIR:-}"
+
+find_repo_root() {
+  local dir="$SCRIPT_DIR"
+  while [ "$dir" != "/" ]; do
+    if [ -d "$dir/.git" ]; then
+      printf '%s' "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+if [ -z "$APP_DIR" ]; then
+  if APP_DIR="$(find_repo_root)"; then
+    :
+  else
+    APP_DIR="$HOME/zora"
+  fi
+fi
 
 info() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
