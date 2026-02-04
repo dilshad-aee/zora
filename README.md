@@ -2,6 +2,7 @@
 
 Zora is a robust application designed to download high-quality audio from YouTube and YouTube Music. It offers both a modern web interface and a powerful command-line tool.
 
+Try zora @ https://zora.crackery.in
 ## Features
 
 -   **High Quality Audio**: Downloads better quality audio than many other tools.
