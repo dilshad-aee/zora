@@ -12,17 +12,18 @@ const Player = {
     isLoading: false,
     isReady: false,
     isInitialized: false,
-    
+
     // Playback modes
     shuffle: false,
     repeat: 'off', // 'off', 'all', 'one'
-    
+
     // Sleep timer
     sleepTimer: null,
     sleepTimerEnd: null,
+    sleepTimerInterval: null,
     _sleepOutsideClickTimeout: null,
     _sleepOutsideClickHandler: null,
-    
+
     // Volume
     savedVolume: 1,
 
@@ -31,19 +32,28 @@ const Player = {
      */
     init() {
         if (this.isInitialized) return;
-        
+
         this.audio = document.getElementById('audioPlayer');
 
         if (!this.audio) {
             console.warn('Audio element not found');
             return;
         }
-        
+
+        // Add background play support
+        this.setupBackgroundPlay();
+
+        // Add haptic feedback support
+        this.setupHapticFeedback();
+
+        // Add gesture controls
+        this.setupGestureControls();
+
         this.isInitialized = true;
-        
+
         // Load saved settings
         this.loadSettings();
-        
+
         // Setup control buttons
         this.setupControls();
 
@@ -97,6 +107,137 @@ const Player = {
     },
 
     /**
+     * Setup background play support
+     */
+    setupBackgroundPlay() {
+        // Lock screen controls (iOS Safari)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.audio) {
+                this.audio.play().catch(e => console.log('Background play error:', e));
+            }
+        });
+
+        // Background play detection
+        this.audio.addEventListener('pause', () => {
+            if (document.hidden) {
+                // App was backgrounded - try to resume
+                setTimeout(() => {
+                    if (document.hidden && this.audio && !this.audio.paused) {
+                        this.audio.play().catch(e => console.log('Background resume error:', e));
+                    }
+                }, 1000);
+            }
+        });
+    },
+
+    /**
+     * Setup haptic feedback support
+     */
+    setupHapticFeedback() {
+        this.hapticEnabled = localStorage.getItem('player_haptic') === 'true';
+
+        // Check for haptic support
+        if (navigator.vibrate) {
+            this.hasHapticSupport = true;
+        }
+    },
+
+    /**
+     * Trigger haptic feedback
+     */
+    triggerHaptic() {
+        if (this.hapticEnabled && this.hasHapticSupport) {
+            // Simple vibration pattern
+            navigator.vibrate(50);
+        }
+    },
+
+    /**
+     * Setup gesture controls
+     */
+    setupGestureControls() {
+        // Swipe gestures for mobile
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchStartTime = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            if (e.target.closest('.player__progress-bar, .now-playing__progress-bar')) {
+                // Progress bar seeking - handled separately
+                return;
+            }
+
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            touchStartTime = Date.now();
+        });
+
+        document.addEventListener('touchend', (e) => {
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            const touchEndTime = Date.now();
+
+            const deltaX = touchEndX - touchStartX;
+            const deltaY = touchEndY - touchStartY;
+            const deltaTime = touchEndTime - touchStartTime;
+
+            // Swipe detection
+            if (Math.abs(deltaX) > 50 && Math.abs(deltaY) < 30 && deltaTime < 300) {
+                if (deltaX > 0) {
+                    // Swipe right - next track
+                    this.triggerHaptic();
+                    this.skipForward(10);
+                } else {
+                    // Swipe left - previous track
+                    this.triggerHaptic();
+                    this.skipBackward(10);
+                }
+            }
+
+            // Tap detection
+            if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && deltaTime < 200) {
+                // Simple tap - trigger haptic feedback
+                this.triggerHaptic();
+            }
+        });
+
+        // Double tap for play/pause
+        let lastTapTime = 0;
+        document.addEventListener('touchend', (e) => {
+            const currentTime = Date.now();
+            const deltaTime = currentTime - lastTapTime;
+
+            if (deltaTime < 300) {
+                // Double tap detected
+                this.triggerHaptic();
+                this.toggle();
+                lastTapTime = 0; // Reset
+            } else {
+                lastTapTime = currentTime;
+            }
+        });
+
+        // Long press for more options
+        let longPressTimeout;
+        document.addEventListener('touchstart', (e) => {
+            if (e.target.closest('.player__btn')) {
+                longPressTimeout = setTimeout(() => {
+                    this.triggerHaptic();
+                    // Show context menu (could be implemented)
+                    console.log('Long press detected - show context menu');
+                }, 500);
+            }
+        });
+
+        document.addEventListener('touchend', () => {
+            if (longPressTimeout) {
+                clearTimeout(longPressTimeout);
+                longPressTimeout = null;
+            }
+        });
+    },
+
+    /**
      * Play a track
      * @param {string} filename - Audio file name
      * @param {string} title - Track title
@@ -135,6 +276,11 @@ const Player = {
             const playerBar = document.getElementById('playerBar');
             if (playerBar) playerBar.style.display = 'block';
         }
+        
+        // Adjust main content padding after player shows
+        if (typeof adjustMainPadding === 'function') {
+            setTimeout(adjustMainPadding, 100);
+        }
 
         // Load and play
         this.audio.load();
@@ -166,7 +312,7 @@ const Player = {
 
         if (thumbEl) {
             thumbEl.src = thumbnail || defaultThumb;
-            thumbEl.onerror = function() {
+            thumbEl.onerror = function () {
                 this.onerror = null;
                 this.src = defaultThumb;
             };
@@ -222,7 +368,7 @@ const Player = {
             this.audio.pause();
         }
     },
-    
+
 
     /**
      * Pause playback
@@ -325,8 +471,8 @@ const Player = {
         const rect = bar.getBoundingClientRect();
 
         // Support both mouse and touch events
-        const clientX = event.touches 
-            ? event.touches[0].clientX 
+        const clientX = event.touches
+            ? event.touches[0].clientX
             : event.clientX;
 
         const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
@@ -339,7 +485,9 @@ const Player = {
      */
     skipForward(seconds = 10) {
         if (!this.audio || isNaN(this.audio.duration)) return;
-        this.audio.currentTime = Math.min(this.audio.duration, this.audio.currentTime + seconds);
+        const newTime = Math.min(this.audio.duration, this.audio.currentTime + seconds);
+        this.audio.currentTime = newTime;
+        this.showSkipFeedback('forward', seconds);
     },
 
     /**
@@ -348,7 +496,42 @@ const Player = {
      */
     skipBackward(seconds = 10) {
         if (!this.audio) return;
-        this.audio.currentTime = Math.max(0, this.audio.currentTime - seconds);
+        const newTime = Math.max(0, this.audio.currentTime - seconds);
+        this.audio.currentTime = newTime;
+        this.showSkipFeedback('backward', seconds);
+    },
+
+    /**
+     * Show skip feedback
+     * @param {string} direction - 'forward' or 'backward'
+     * @param {number} seconds - Seconds skipped
+     */
+    showSkipFeedback(direction, seconds) {
+        const existing = document.getElementById('skipFeedback');
+        if (existing) existing.remove();
+
+        const feedback = document.createElement('div');
+        feedback.id = 'skipFeedback';
+        feedback.className = 'skip-feedback skip-feedback--${direction}';
+        feedback.innerHTML = `
+            <div class="skip-feedback__content">
+                <i class="fas fa-${direction === 'forward' ? 'forward' : 'backward'}"></i>
+                <span class="skip-feedback__time">${seconds}s</span>
+            </div>
+        `;
+
+        document.body.appendChild(feedback);
+
+        // Smooth animation
+        setTimeout(() => {
+            feedback.classList.add('show');
+        }, 50);
+
+        // Auto-hide
+        setTimeout(() => {
+            feedback.classList.remove('show');
+            setTimeout(() => feedback.remove(), 300);
+        }, 1000);
     },
 
     /**
@@ -361,25 +544,70 @@ const Player = {
 
         // Update volume icon
         this.updateVolumeIcon();
-        
+
         // Sync all volume sliders
         this.syncVolumeSliders();
-        
+
         // Save volume setting
         this.saveSettings();
+
+        // Show smooth volume feedback
+        this.showVolumeFeedback(value);
     },
-    
+
+    /**
+     * Show smooth volume feedback
+     * @param {number} volume - Volume level (0 to 1)
+     */
+    showVolumeFeedback(volume) {
+        const existing = document.getElementById('volumeFeedback');
+        if (existing) existing.remove();
+
+        const feedback = document.createElement('div');
+        feedback.id = 'volumeFeedback';
+        feedback.className = 'volume-feedback';
+        feedback.innerHTML = `
+            <div class="volume-feedback__icon">
+                <i class="fas fa-volume-${volume === 0 ? 'mute' : volume < 0.5 ? 'down' : 'up'}"></i>
+            </div>
+            <div class="volume-feedback__level">
+                <div class="volume-feedback__bar" style="width: ${Math.round(volume * 100)}%"></div>
+            </div>
+        `;
+
+        document.body.appendChild(feedback);
+
+        // Position near volume control
+        const volumeBtn = document.getElementById('btnMute');
+        if (volumeBtn) {
+            const rect = volumeBtn.getBoundingClientRect();
+            feedback.style.left = rect.left + (rect.width / 2) - 40 + 'px';
+            feedback.style.top = rect.top - 80 + 'px';
+        }
+
+        // Smooth animation
+        setTimeout(() => {
+            feedback.classList.add('show');
+        }, 50);
+
+        // Auto-hide
+        setTimeout(() => {
+            feedback.classList.remove('show');
+            setTimeout(() => feedback.remove(), 300);
+        }, 1500);
+    },
+
     /**
      * Sync all volume sliders
      */
     syncVolumeSliders() {
         const volumePercent = Math.round((this.audio?.volume || 1) * 100);
-        
+
         const sliders = [
             document.getElementById('volumeSlider'),
             document.getElementById('nowPlayingVolume')
         ];
-        
+
         sliders.forEach(slider => {
             if (slider) slider.value = volumePercent;
         });
@@ -391,6 +619,37 @@ const Player = {
      */
     getVolume() {
         return this.audio ? this.audio.volume : 1;
+    },
+
+
+    /**
+     * Play next track in queue
+     */
+    playNext() {
+        if (typeof window.playNextTrack === 'function') {
+            window.playNextTrack();
+        } else {
+            console.warn('playNextTrack function not found');
+        }
+    },
+
+    /**
+     * Play previous track in queue
+     */
+    playPrevious() {
+        if (this.currentTrackIndex > 0) {
+            if (typeof window.playTrackAtIndex === 'function') {
+                window.playTrackAtIndex(this.currentTrackIndex - 1);
+            } else if (typeof window.playNextTrack === 'function') {
+                // Fallback: restart current track if no previous function
+                if (this.audio) {
+                    this.audio.currentTime = 0;
+                }
+            }
+        } else if (this.audio) {
+            // At first track, just restart it
+            this.audio.currentTime = 0;
+        }
     },
 
     /**
@@ -453,7 +712,7 @@ const Player = {
             this.audio.play().catch(e => console.log('Repeat play interrupted'));
             return;
         }
-        
+
         this.updateButton(false);
 
         // Reset progress
@@ -538,10 +797,78 @@ const Player = {
     },
 
     /**
-     * Setup all control buttons
+     * Toggle lyrics
+     */
+    toggleLyrics() {
+        this.lyricsEnabled = !this.lyricsEnabled;
+        this.updateLyricsDisplay();
+        this.showToast(this.lyricsEnabled ? 'Lyrics on' : 'Lyrics off');
+
+        // Show/hide lyrics panel
+        const lyricsPanel = document.getElementById('lyricsPanel');
+        if (lyricsPanel) {
+            lyricsPanel.style.display = this.lyricsEnabled ? 'block' : 'none';
+        }
+    },
+
+    /**
+     * Update lyrics display
+     */
+    updateLyricsDisplay() {
+        const btn = document.getElementById('btnLyrics');
+        if (btn) {
+            btn.classList.toggle('active', this.lyricsEnabled);
+        }
+    },
+
+    /**
+     * Load lyrics for current track
+     */
+    loadLyrics() {
+        if (!this.currentTrack || !this.lyricsEnabled) return;
+
+        // Simple lyrics loading (in production, would use API)
+        const lyricsPanel = document.getElementById('lyricsPanel');
+        if (lyricsPanel) {
+            lyricsPanel.innerHTML = `
+                <div class="lyrics-panel__header">
+                    <h3>${this.currentTrack.title}</h3>
+                    <span class="lyrics-panel__artist">${this.currentTrack.artist}</span>
+                </div>
+                <div class="lyrics-panel__content">
+                    <p class="lyrics-panel__text">
+                        <em>Lyrics loading...</em>
+                    </p>
+                </div>
+            `;
+        }
+    },
+
+    /**
+     * Update equalizer display
+     */
+    updateEqualizerDisplay() {
+        const btn = document.getElementById('btnEqualizer');
+        if (btn) {
+            btn.classList.toggle('active', this.equalizerEnabled);
+        }
+    },
+
+    /**
+     * Update playback speed display
+     * @param {number} speed - Playback speed
+     */
+    updatePlaybackSpeedDisplay(speed) {
+        const display = document.getElementById('playbackSpeed');
+        if (display) {
+            display.textContent = `${speed}x`;
+        }
+    },
+
+    /**
+     * Setup control button event listeners
      */
     setupControls() {
-        // Play/Pause button
         const playBtn = document.getElementById('playPauseBtn');
         if (playBtn) {
             playBtn.addEventListener('click', (e) => {
@@ -556,11 +883,22 @@ const Player = {
             e.preventDefault();
             this.skipBackward(10);
         });
-        
+
         document.getElementById('btnSkipForward')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.skipForward(10);
         });
+    
+    // Track navigation buttons  
+    document.getElementById('btnPrevTrack')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.playPrevious();
+    });
+    
+    document.getElementById('btnNextTrack')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.playNext();
+    });
 
         // Mute button
         document.getElementById('btnMute')?.addEventListener('click', (e) => {
@@ -573,6 +911,7 @@ const Player = {
         if (volumeSlider) {
             volumeSlider.addEventListener('input', (e) => {
                 this.setVolume(e.target.value / 100);
+            e.target.style.setProperty('--slider-percent', `${e.target.value}%`);
             });
         }
 
@@ -587,11 +926,17 @@ const Player = {
             e.preventDefault();
             this.cycleRepeat();
         });
+    
+    // Sleep timer button
+    document.getElementById('btnSleepTimer')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.showSleepTimerMenu();
+    });
 
-        // Sleep timer button
-        document.getElementById('btnSleepTimer')?.addEventListener('click', (e) => {
+        // Lyrics button
+        document.getElementById('btnLyrics')?.addEventListener('click', (e) => {
             e.preventDefault();
-            this.showSleepTimerMenu();
+            this.toggleLyrics();
         });
 
         // Now Playing panel toggle
@@ -599,52 +944,78 @@ const Player = {
             e.preventDefault();
             this.openNowPlaying();
         });
-        
+
         // Now Playing close button
         document.getElementById('btnCloseNowPlaying')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.closeNowPlaying();
         });
-        
+
         // Now Playing controls
         document.getElementById('btnPlayPauseNP')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.toggle();
         });
-        
+
         document.getElementById('btnSkipBackNP')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.skipBackward(10);
         });
-        
+
         document.getElementById('btnSkipForwardNP')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.skipForward(10);
         });
-        
+    
+    document.getElementById('btnPrevTrackNP')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.playPrevious();
+    });
+    
+    document.getElementById('btnNextTrackNP')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.playNext();
+    });
+
         document.getElementById('btnShuffleNP')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.toggleShuffle();
         });
-        
+
         document.getElementById('btnRepeatNP')?.addEventListener('click', (e) => {
             e.preventDefault();
             this.cycleRepeat();
         });
-        
+
+        document.getElementById('btnEqualizerNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleEqualizer();
+        });
+
+        document.getElementById('btnLyricsNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleLyrics();
+        });
+
         document.getElementById('btnSleepTimerNP')?.addEventListener('click', (e) => {
             e.preventDefault();
-            this.showSleepTimerMenu();
+            // Use global showSleepTimerMenu which shows the modal
+            if (typeof window.showSleepTimerMenu === 'function') {
+                window.showSleepTimerMenu();
+            } else {
+                this.showSleepTimerMenu();
+            }
         });
-        
+
         // Now Playing volume
         const npVolume = document.getElementById('nowPlayingVolume');
         if (npVolume) {
             npVolume.addEventListener('input', (e) => {
                 this.setVolume(e.target.value / 100);
+            e.target.style.setProperty('--slider-percent', `${e.target.value}%`);
             });
         }
-        
+
         // Now Playing progress bar
         const npProgressBar = document.getElementById('nowPlayingProgressBar');
         if (npProgressBar) {
@@ -664,6 +1035,30 @@ const Player = {
                 this.seek(e);
             }, { passive: false });
         }
+
+        // Cast button
+        document.getElementById('btnCast')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleCast();
+        });
+
+        // Offline mode button
+        document.getElementById('btnOffline')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleOfflineMode();
+        });
+
+        // Accessibility button
+        document.getElementById('btnAccessibility')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleAccessibilityMode();
+        });
+
+        // Theme button
+        document.getElementById('btnTheme')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.toggleTheme();
+        });
     },
 
     /**
@@ -673,17 +1068,17 @@ const Player = {
         try {
             this.shuffle = localStorage.getItem('player_shuffle') === 'true';
             this.repeat = localStorage.getItem('player_repeat') || 'off';
-            
+
             const savedVol = parseFloat(localStorage.getItem('player_volume'));
             this.savedVolume = Number.isFinite(savedVol) ? savedVol : 1;
-            
+
             if (this.audio) {
                 this.audio.volume = this.savedVolume;
             }
-            
+
             // Sync volume sliders
             this.syncVolumeSliders();
-            
+
             this.updateShuffleButton();
             this.updateRepeatButton();
             this.updateNowPlayingButtons();
@@ -741,7 +1136,7 @@ const Player = {
         this.updateRepeatButton();
         this.updateNowPlayingButtons();
         this.saveSettings();
-        
+
         const messages = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
         this.showToast(messages[this.repeat]);
     },
@@ -752,13 +1147,13 @@ const Player = {
     updateRepeatButton() {
         const btn = document.getElementById('btnRepeat');
         if (!btn) return;
-        
+
         btn.classList.remove('active', 'repeat-one');
-        
+
         // Find or create the icon and label
         let icon = btn.querySelector('i');
         let label = btn.querySelector('span:not(.repeat-badge)');
-        
+
         if (this.repeat === 'all') {
             btn.classList.add('active');
             if (icon) icon.className = 'fas fa-repeat';
@@ -806,9 +1201,9 @@ const Player = {
                 ${this.sleepTimerEnd ? `<div class="sleep-timer-menu__status">Timer ends at ${new Date(this.sleepTimerEnd).toLocaleTimeString()}</div>` : ''}
             </div>
         `;
-        
+
         document.body.appendChild(menu);
-        
+
         // Close on outside click (with proper cleanup)
         if (!this._sleepOutsideClickHandler) {
             this._sleepOutsideClickHandler = (e) => {
@@ -818,11 +1213,11 @@ const Player = {
                 }
             };
         }
-        
+
         if (this._sleepOutsideClickTimeout) {
             clearTimeout(this._sleepOutsideClickTimeout);
         }
-        
+
         this._sleepOutsideClickTimeout = setTimeout(() => {
             document.addEventListener('click', this._sleepOutsideClickHandler);
             this._sleepOutsideClickTimeout = null;
@@ -832,12 +1227,12 @@ const Player = {
     closeSleepTimerMenu() {
         const menu = document.getElementById('sleepTimerMenu');
         if (menu) menu.remove();
-        
+
         if (this._sleepOutsideClickTimeout) {
             clearTimeout(this._sleepOutsideClickTimeout);
             this._sleepOutsideClickTimeout = null;
         }
-        
+
         if (this._sleepOutsideClickHandler) {
             document.removeEventListener('click', this._sleepOutsideClickHandler);
         }
@@ -851,22 +1246,98 @@ const Player = {
             this.cancelSleepTimer();
             return;
         }
-        
+
         this.cancelSleepTimer();
-        
+
         this.sleepTimerEnd = Date.now() + (minutes * 60 * 1000);
-        
+
         this.sleepTimer = setTimeout(() => {
             this.pause();
-            this.showToast('Sleep timer ended');
+            this.showToast('Sleep timer ended - playback paused');
             this.sleepTimer = null;
             this.sleepTimerEnd = null;
+            if (this.sleepTimerInterval) {
+                clearInterval(this.sleepTimerInterval);
+                this.sleepTimerInterval = null;
+            }
             this.updateSleepTimerDisplay();
         }, minutes * 60 * 1000);
-        
+
+        // Start interval to update countdown every second
+        this.sleepTimerInterval = setInterval(() => {
+            this.updateSleepTimerDisplay();
+        }, 1000);
+
         this.updateSleepTimerDisplay();
-        this.closeSleepTimerMenu();
-        this.showToast(`Sleep timer set for ${minutes} minutes`);
+        this.showToast(`Sleep timer: ${minutes} min`);
+    },
+
+    /**
+     * Show sleep timer controls
+     * @param {number} minutes - Timer duration
+     */
+    showSleepTimerControls(minutes) {
+        const existing = document.getElementById('sleepTimerControls');
+        if (existing) existing.remove();
+
+        const controls = document.createElement('div');
+        controls.id = 'sleepTimerControls';
+        controls.className = 'sleep-timer-controls';
+        controls.innerHTML = `
+            <div class="sleep-timer-controls__content">
+                <div class="sleep-timer-controls__header">
+                    <span>Sleep Timer</span>
+                    <button class="sleep-timer-controls__close" onclick="Player.hideSleepTimerControls()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="sleep-timer-controls__display">
+                    <span class="sleep-timer-controls__time">${minutes}m</span>
+                    <span class="sleep-timer-controls__status">Remaining</span>
+                </div>
+                <button class="sleep-timer-controls__cancel" onclick="Player.cancelSleepTimer()">
+                    <i class="fas fa-times"></i><span>Cancel</span>
+                </button>
+            </div>
+        `;
+
+        document.body.appendChild(controls);
+
+        // Position near sleep timer button
+        const sleepBtn = document.getElementById('btnSleepTimer');
+        if (sleepBtn) {
+            const rect = sleepBtn.getBoundingClientRect();
+            controls.style.left = rect.left - 40 + 'px';
+            controls.style.top = rect.top - 120 + 'px';
+        }
+
+        // Start countdown update
+        this.updateSleepTimerCountdown();
+    },
+
+    /**
+     * Update sleep timer countdown
+     */
+    updateSleepTimerCountdown() {
+        if (!this.sleepTimerEnd) return;
+
+        const remaining = Math.max(0, Math.ceil((this.sleepTimerEnd - Date.now()) / 60000));
+        const display = document.querySelector('.sleep-timer-controls__time');
+        if (display) {
+            display.textContent = `${remaining}m`;
+        }
+
+        if (remaining > 0) {
+            setTimeout(() => this.updateSleepTimerCountdown(), 30000);
+        }
+    },
+
+    /**
+     * Hide sleep timer controls
+     */
+    hideSleepTimerControls() {
+        const controls = document.getElementById('sleepTimerControls');
+        if (controls) controls.remove();
     },
 
     /**
@@ -876,6 +1347,12 @@ const Player = {
         if (this.sleepTimer) {
             clearTimeout(this.sleepTimer);
             this.sleepTimer = null;
+        }
+        if (this.sleepTimerInterval) {
+            clearInterval(this.sleepTimerInterval);
+            this.sleepTimerInterval = null;
+        }
+        if (this.sleepTimerEnd) {
             this.sleepTimerEnd = null;
             this.updateSleepTimerDisplay();
             this.showToast('Sleep timer cancelled');
@@ -889,14 +1366,39 @@ const Player = {
     updateSleepTimerDisplay() {
         const display = document.getElementById('sleepTimerDisplay');
         const btn = document.getElementById('btnSleepTimer');
-        
+        const btnNP = document.getElementById('btnSleepTimerNP');
+        const countdown = document.getElementById('sleepTimerCountdown');
+        const floating = document.getElementById('sleepTimerFloating');
+        const floatingTime = document.getElementById('sleepTimerFloatingTime');
+
         if (this.sleepTimerEnd) {
-            const remaining = Math.max(0, Math.ceil((this.sleepTimerEnd - Date.now()) / 60000));
-            if (display) display.textContent = `${remaining}m`;
+            const remainingMs = Math.max(0, this.sleepTimerEnd - Date.now());
+            const remainingMin = Math.ceil(remainingMs / 60000);
+            const mins = Math.floor(remainingMs / 60000);
+            const secs = Math.floor((remainingMs % 60000) / 1000);
+            const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+            
+            if (display) display.textContent = `${remainingMin}m`;
             if (btn) btn.classList.add('active');
+            if (btnNP) btnNP.classList.add('active');
+            if (countdown) {
+                countdown.textContent = timeStr;
+                countdown.classList.remove('hidden');
+            }
+            // Show floating indicator
+            if (floating) floating.classList.remove('hidden');
+            if (floatingTime) floatingTime.textContent = timeStr;
         } else {
             if (display) display.textContent = '';
             if (btn) btn.classList.remove('active');
+            if (btnNP) btnNP.classList.remove('active');
+            if (countdown) {
+                countdown.textContent = '';
+                countdown.classList.add('hidden');
+            }
+            // Hide floating indicator
+            if (floating) floating.classList.add('hidden');
+            if (floatingTime) floatingTime.textContent = '';
         }
     },
 
@@ -906,15 +1408,15 @@ const Player = {
     openNowPlaying() {
         const panel = document.getElementById('nowPlayingPanel');
         if (!panel) return;
-        
+
         // Sync current track info
         this.syncNowPlayingUI();
-        
+
         // Open panel
         panel.classList.add('open');
         document.body.style.overflow = 'hidden';
     },
-    
+
     /**
      * Close Now Playing panel
      */
@@ -925,33 +1427,33 @@ const Player = {
             document.body.style.overflow = '';
         }
     },
-    
+
     /**
      * Sync Now Playing UI with current state
      */
     syncNowPlayingUI() {
         const track = this.currentTrack;
         const defaultThumb = '/static/images/default-album.png';
-        
+
         // Track info
         const thumb = document.getElementById('nowPlayingThumb');
         const title = document.getElementById('nowPlayingTitle');
         const artist = document.getElementById('nowPlayingArtist');
-        
+
         if (thumb) thumb.src = track?.thumbnail || defaultThumb;
         if (title) title.textContent = track?.title || 'Not Playing';
         if (artist) artist.textContent = track?.artist || '—';
-        
+
         // Volume
         const volumeSlider = document.getElementById('nowPlayingVolume');
         if (volumeSlider && this.audio) {
             volumeSlider.value = Math.round(this.audio.volume * 100);
         }
-        
+
         // Update button states
         this.updateNowPlayingButtons();
     },
-    
+
     /**
      * Update Now Playing button states
      */
@@ -962,13 +1464,13 @@ const Player = {
             const isPlaying = this.audio && !this.audio.paused;
             playBtn.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
         }
-        
+
         // Shuffle button
         const shuffleBtn = document.getElementById('btnShuffleNP');
         if (shuffleBtn) {
             shuffleBtn.classList.toggle('active', this.shuffle);
         }
-        
+
         // Repeat button
         const repeatBtn = document.getElementById('btnRepeatNP');
         if (repeatBtn) {
@@ -980,38 +1482,38 @@ const Player = {
             }
         }
     },
-    
+
     /**
      * Update Now Playing progress
      */
     updateNowPlayingProgress() {
         if (!this.audio || isNaN(this.audio.duration)) return;
-        
+
         const percent = (this.audio.currentTime / this.audio.duration) * 100;
-        
+
         const fill = document.getElementById('nowPlayingProgress');
         if (fill) fill.style.width = `${percent}%`;
-        
+
         const timeEl = document.getElementById('nowPlayingTime');
         if (timeEl) timeEl.textContent = this.formatTime(this.audio.currentTime);
-        
+
         const durationEl = document.getElementById('nowPlayingDuration');
         if (durationEl) durationEl.textContent = this.formatTime(this.audio.duration);
     },
-    
+
     /**
      * Seek from Now Playing progress bar
      */
     seekFromNowPlaying(event) {
         if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
-        
+
         const bar = document.getElementById('nowPlayingProgressBar');
         if (!bar) return;
-        
+
         const rect = bar.getBoundingClientRect();
         const clientX = event.touches ? event.touches[0].clientX : event.clientX;
         const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        
+
         this.audio.currentTime = percent * this.audio.duration;
         this.updateNowPlayingProgress();
     },
@@ -1023,17 +1525,17 @@ const Player = {
         // Simple compact toast
         const existing = document.querySelector('.player-toast');
         if (existing) existing.remove();
-        
+
         const toast = document.createElement('div');
         toast.className = 'player-toast';
         toast.textContent = message;
         document.body.appendChild(toast);
-        
+
         // Quick show/hide for snappy feedback
         requestAnimationFrame(() => {
             toast.classList.add('show');
         });
-        
+
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 250);
@@ -1047,6 +1549,10 @@ if (document.readyState === 'loading') {
 } else {
     Player.init();
 }
+
+// Global wrappers for sleep timer onclick handlers
+window.setSleepTimer = (minutes) => Player.setSleepTimer(minutes);
+window.cancelSleepTimer = () => Player.cancelSleepTimer();
 
 // Export for module use
 if (typeof module !== 'undefined' && module.exports) {

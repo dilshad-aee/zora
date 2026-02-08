@@ -294,10 +294,16 @@ def get_status(job_id: str):
     return jsonify(download)
 
 
+
+
 @bp.route('/api/downloads')
 def list_downloads():
     """List all active download jobs."""
     return jsonify(queue_service.get_all_downloads())
+
+
+
+
 
 
 @bp.route('/downloads/<filename>')

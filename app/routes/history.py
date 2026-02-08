@@ -10,9 +10,44 @@ bp = Blueprint('history', __name__)
 
 @bp.route('/history', methods=['GET'])
 def get_history():
-    """Get download history."""
-    downloads = Download.get_history(limit=100)
-    return jsonify([d.to_dict() for d in downloads])
+    """Get download history using raw SQL."""
+    import sqlite3
+    from config import config
+    
+    try:
+        db_path = config.BASE_DIR / 'data.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, video_id, title, artist, filename, format, quality, 
+                   thumbnail, duration, file_size, downloaded_at
+            FROM downloads
+            ORDER BY downloaded_at DESC
+        """)
+        
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                'id': row['id'],
+                'video_id': row['video_id'],
+                'title': row['title'],
+                'artist': row['artist'],
+                'filename': row['filename'],
+                'format': row['format'],
+                'quality': row['quality'],
+                'thumbnail': row['thumbnail'],
+                'duration': row['duration'],
+                'file_size': row['file_size'],
+                'downloaded_at': row['downloaded_at']
+            })
+        
+        conn.close()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/history/clear', methods=['POST'])

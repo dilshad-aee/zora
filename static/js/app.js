@@ -21,7 +21,12 @@ const State = {
         selected: new Set()
     },
     playlistSession: null,
-    playlistPollInterval: null
+    playlistPollInterval: null,
+    playlistDownload: {
+        sessionId: null,
+        lastStatus: null,
+        inProgress: false
+    }
 };
 
 // ==================== Initialize ====================
@@ -35,6 +40,18 @@ async function init() {
 
     // Setup event listeners
     setupEventListeners();
+    
+    // Adjust main content padding based on player height
+    adjustMainPadding();
+    window.addEventListener('resize', adjustMainPadding);
+
+    // Restore playlist download session from localStorage
+    const savedSession = localStorage.getItem('playlist_download_session');
+    if (savedSession) {
+        State.playlistDownload.sessionId = savedSession;
+        State.playlistSession = savedSession;
+        startPlaylistPolling();
+    }
 
     // Load data
     await loadSettings();
@@ -50,6 +67,30 @@ function setupEventListeners() {
             if (e.key === 'Enter') handleMainAction();
         });
     }
+}
+
+// ==================== Dynamic Padding for Player ====================
+function adjustMainPadding() {
+    const player = document.getElementById('playerBar');
+    const mobileNav = document.querySelector('.mobile-nav');
+    const main = document.getElementById('mainContent');
+    
+    if (!main) return;
+    
+    // Calculate total height of fixed bottom elements
+    let bottomHeight = 0;
+    
+    if (player && !player.classList.contains('hidden')) {
+        bottomHeight += player.offsetHeight;
+    }
+    
+    if (mobileNav && window.getComputedStyle(mobileNav).display !== 'none') {
+        bottomHeight += mobileNav.offsetHeight;
+    }
+    
+    // Add extra padding for safe area and breathing room
+    const extraPadding = 20;
+    main.style.paddingBottom = (bottomHeight + extraPadding) + 'px';
 }
 
 // ==================== Tab Switching ====================
@@ -810,6 +851,9 @@ async function downloadSelectedSongsNew() {
         if (!response.ok) throw new Error(data.error);
 
         State.playlistSession = data.session_id;
+        State.playlistDownload.sessionId = data.session_id;
+        State.playlistDownload.inProgress = true;
+        localStorage.setItem('playlist_download_session', data.session_id);
 
         // Switch to playlist downloads view
         showView('playlist-downloads');
@@ -823,6 +867,11 @@ async function downloadSelectedSongsNew() {
     } catch (error) {
         UI.toast(error.message, 'error');
     }
+}
+
+function isViewActive(viewId) {
+    const el = document.getElementById(viewId);
+    return el && !el.classList.contains('hidden');
 }
 
 function startPlaylistPolling() {
@@ -844,11 +893,19 @@ function startPlaylistPolling() {
             }
 
             const session = await response.json();
-            updatePlaylistDownloadView(session);
+            State.playlistDownload.lastStatus = session;
+            State.playlistDownload.inProgress = (session.completed + session.failed) < session.total;
+
+            // Only update view if it's active
+            if (isViewActive('playlistDownloadsView')) {
+                updatePlaylistDownloadView(session);
+            }
 
             // Check if completed
             if (session.completed + session.failed >= session.total) {
                 clearInterval(State.playlistPollInterval);
+                localStorage.removeItem('playlist_download_session');
+                State.playlistDownload.inProgress = false;
                 UI.toast(
                     `Playlist complete! ${session.completed} of ${session.total} downloaded.`,
                     'success'
@@ -863,6 +920,10 @@ function startPlaylistPolling() {
 }
 
 function updatePlaylistDownloadView(session) {
+    const noActiveEl = document.getElementById('noActiveDownload');
+    const activeEl = document.getElementById('activePlaylistDownload');
+    if (!noActiveEl || !activeEl) return;
+
     UI.hide('noActiveDownload');
     UI.show('activePlaylistDownload');
 

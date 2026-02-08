@@ -22,10 +22,12 @@ if __name__ == '__main__':
     ║                                       ║
     ╚═══════════════════════════════════════╝
     
-    🌐 Open http://localhost:5000 in your browser
+    🌐 Open http://localhost:5001 in your browser
     📁 Downloads: ./downloads
     
     Press Ctrl+C to stop
     """)
     
-    app.run(debug=True, port=5000, threaded=True)
+    # Using port 5001 to avoid conflicts with macOS 'ControlCenter' (AirPlay Receiver)
+    # Disable debug mode to prevent reloader hangs
+    app.run(debug=False, port=5001, threaded=True)

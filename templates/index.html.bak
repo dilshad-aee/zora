@@ -472,13 +472,16 @@
         </div>
         <div class="now-playing__controls">
                 <button type="button" class="now-playing__btn" id="btnShuffleNP"><i class="fas fa-random"></i></button>
-                <button type="button" class="now-playing__btn" id="btnPrevTrackNP"><i class="fas fa-step-backward"></i></button>
-                <button type="button" class="now-playing__btn" id="btnSkipBackNP"><i class="fas fa-backward"></i></button>
+                <button type="button" class="now-playing__btn now-playing__btn--skip" id="btnPrevTrackNP"><i class="fas fa-step-backward"></i></button>
                 <button type="button" class="now-playing__btn now-playing__btn--play" id="btnPlayPauseNP"><i class="fas fa-play"></i></button>
-                <button type="button" class="now-playing__btn" id="btnSkipForwardNP"><i class="fas fa-forward"></i></button>
-                <button type="button" class="now-playing__btn" id="btnNextTrackNP"><i class="fas fa-step-forward"></i></button>
+                <button type="button" class="now-playing__btn now-playing__btn--skip" id="btnSkipForwardNP"><i class="fas fa-step-forward"></i></button>
                 <button type="button" class="now-playing__btn" id="btnRepeatNP"><i class="fas fa-repeat"></i></button>
-        </div>
+                <button type="button" class="now-playing__btn" id="btnEqualizerNP"><i class="fas fa-dumbbell"></i></button>
+                <button type="button" class="now-playing__btn" id="btnLyricsNP"><i class="fas fa-music"></i></button>
+                <button type="button" class="now-playing__btn" id="btnCastNP"><i class="fas fa-chromecast"></i></button>
+                <button type="button" class="now-playing__btn" id="btnOfflineNP"><i class="fas fa-wifi-slash"></i></button>
+                <button type="button" class="now-playing__btn" id="btnAccessibilityNP"><i class="fas fa-universal-access"></i></button>
+                <button type="button" class="now-playing__btn" id="btnSleepTimerNP"><i class="fas fa-moon"></i></button>
         <div class="now-playing__extras">
             <div class="now-playing__volume">
                 <i class="fas fa-volume-down"></i>
@@ -489,7 +492,6 @@
             <button type="button" class="now-playing__extra-btn" id="btnSleepTimerNP">
                 <i class="fas fa-moon"></i>
                 <span>Sleep Timer</span>
-                <span class="sleep-timer-countdown hidden" id="sleepTimerCountdown"></span>
             </button>
         </div>
     </div>
@@ -572,12 +574,6 @@
     
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
-    
-    <!-- Floating Sleep Timer Indicator -->
-    <div class="sleep-timer-floating hidden" id="sleepTimerFloating" onclick="showSleepTimerMenu()">
-        <i class="fas fa-moon"></i>
-        <span id="sleepTimerFloatingTime"></span>
-    </div>
     
     <!-- Seek Preview (for touch gestures) -->
     <div class="seek-preview" id="seekPreview" style="display: none;"></div>
