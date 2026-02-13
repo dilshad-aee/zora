@@ -3,6 +3,7 @@ Main API Routes - Home, Info, Download, Search.
 """
 
 import os
+import re
 import threading
 from datetime import datetime
 from flask import Blueprint, jsonify, request, render_template, send_from_directory
@@ -35,12 +36,14 @@ def get_info():
     
     try:
         info = YouTubeService.get_info(url)
-        
-        # Check for duplicates
+
+        # Always check duplicates using strong multi-parameter matching.
         from app.models import Download
         is_duplicate, existing_file = Download.check_duplicate(
-            info.get('title', ''), 
-            info.get('id')
+            title=info.get('title', ''),
+            video_id=info.get('id'),
+            artist=info.get('uploader'),
+            duration=info.get('duration'),
         )
         info['is_duplicate'] = is_duplicate
         info['existing_file'] = existing_file
@@ -110,20 +113,20 @@ def start_download():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-    # Check for duplicates (unless force=True)
-    if not force:
-        from app.models import Download
-        is_duplicate, existing_file = Download.check_duplicate(
-            info.get('title', ''),
-            info.get('id')
-        )
-        if is_duplicate:
-            return jsonify({
-                'is_duplicate': True,
-                'title': info.get('title'),
-                'existing_file': existing_file,
-                'error': 'File already exists'
-            }), 409
+    # Always skip duplicates; no force override.
+    from app.models import Download
+    is_duplicate, existing_file = Download.check_duplicate(
+        title=info.get('title', ''),
+        video_id=info.get('id'),
+        artist=info.get('uploader'),
+        duration=info.get('duration'),
+    )
+    if is_duplicate:
+        return jsonify({
+            'skipped_duplicate': True,
+            'title': info.get('title'),
+            'existing_file': existing_file,
+        }), 200
     
     # Create download job
     job_id = queue_service.create_download(url, audio_format, quality)
@@ -173,10 +176,15 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
         """Save track to database with thumbnail fallback."""
         try:
             existing_id = track_info.get('id') or track_info.get('video_id')
-            if existing_id:
-                if Download.query.filter_by(video_id=existing_id).first():
-                    print(f"[JOB:{job_id}] Track already exists in DB, skipping", flush=True)
-                    return
+            is_duplicate, _ = Download.check_duplicate(
+                title=track_info.get('title', ''),
+                video_id=existing_id,
+                artist=track_info.get('artist') or track_info.get('uploader'),
+                duration=track_info.get('duration'),
+            )
+            if is_duplicate:
+                print(f"[JOB:{job_id}] Track already exists in library, skipping DB insert", flush=True)
+                return
             
             # Get thumbnail with multiple fallbacks
             thumbnail = track_info.get('thumbnail')
@@ -250,9 +258,11 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
         print(f"[JOB:{job_id}] Download result success: {result.get('success')}", flush=True)
         
         if result.get('success'):
+            result_filename = os.path.basename(result.get('filename', '')) if result.get('filename') else ''
             queue_service.update_download(job_id,
                 status='completed',
-                completed_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                completed_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                filename=result_filename
             )
             
             # Merge info (has thumbnail) with result (has filename)
@@ -302,6 +312,103 @@ def list_downloads():
     return jsonify(queue_service.get_all_downloads())
 
 
+def _resolve_playable_filename(requested_filename: str):
+    """
+    Resolve a filename to an existing playable audio file.
+
+    Supports fallback when DB has stale names like `.webm` while disk has `.m4a`.
+    """
+    preferred_exts = ['.m4a', '.mp3', '.aac', '.ogg', '.opus', '.flac', '.wav', '.webm', '.mka']
+
+    safe_name = os.path.basename(requested_filename or '')
+    if not safe_name:
+        return None
+
+    requested_path = config.DOWNLOAD_DIR / safe_name
+    if (
+        requested_path.exists()
+        and requested_path.is_file()
+        and requested_path.suffix.lower() in preferred_exts
+    ):
+        return requested_path.name
+
+    # 1) Same stem, different extension
+    stem = requested_path.stem
+    for ext in preferred_exts:
+        candidate = config.DOWNLOAD_DIR / f"{stem}{ext}"
+        if candidate.exists() and candidate.is_file():
+            return candidate.name
+
+    # 2) Match by YouTube ID in filename: "... [VIDEO_ID].ext"
+    match = re.search(r'\[([A-Za-z0-9_-]{11})\]', stem)
+    if match:
+        video_id = match.group(1)
+        candidates = [
+            p for p in config.DOWNLOAD_DIR.glob(f"* [{video_id}].*")
+            if p.is_file()
+        ]
+        if candidates:
+            def ext_rank(path):
+                ext = path.suffix.lower()
+                try:
+                    return preferred_exts.index(ext)
+                except ValueError:
+                    return len(preferred_exts)
+
+            candidates.sort(key=ext_rank)
+            return candidates[0].name
+
+    return None
+
+
+def _ensure_browser_compatible_audio(filename: str):
+    """
+    Ensure returned file is broadly browser-compatible.
+
+    Converts lone `.webm` files to `.m4a` on demand when possible.
+    """
+    path = config.DOWNLOAD_DIR / filename
+    if not path.exists() or path.suffix.lower() != '.webm':
+        return filename
+
+    target = path.with_suffix('.m4a')
+    if target.exists() and target.is_file():
+        return target.name
+
+    import shutil
+    import subprocess
+
+    if not shutil.which('ffmpeg'):
+        return filename
+
+    cmd = [
+        'ffmpeg',
+        '-y',
+        '-i',
+        str(path),
+        '-vn',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '192k',
+        str(target),
+    ]
+    subprocess.run(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if target.exists() and target.stat().st_size > 0:
+        try:
+            path.unlink()
+        except Exception:
+            pass
+        return target.name
+
+    return filename
+
+
 
 
 
@@ -321,7 +428,13 @@ def serve_thumbnail(filename):
 @bp.route('/play/<filename>')
 def play_audio(filename):
     """Stream audio file for playback."""
-    filepath = config.DOWNLOAD_DIR / filename
+    resolved_filename = _resolve_playable_filename(filename)
+    if not resolved_filename:
+        return jsonify({'error': 'File not found'}), 404
+
+    resolved_filename = _ensure_browser_compatible_audio(resolved_filename)
+
+    filepath = config.DOWNLOAD_DIR / resolved_filename
     if not filepath.exists():
         return jsonify({'error': 'File not found'}), 404
     
@@ -334,10 +447,12 @@ def play_audio(filename):
         '.wav': 'audio/wav',
         '.ogg': 'audio/ogg',
         '.aac': 'audio/aac',
+        '.webm': 'audio/webm',
+        '.mka': 'audio/x-matroska',
     }
     mime_type = mime_types.get(ext, 'audio/mpeg')
     
-    return send_from_directory(str(config.DOWNLOAD_DIR), filename, mimetype=mime_type)
+    return send_from_directory(str(config.DOWNLOAD_DIR), resolved_filename, mimetype=mime_type)
 
 
 @bp.route('/api/open-folder', methods=['POST'])
@@ -401,6 +516,7 @@ def get_playlist_download_status(session_id):
 
 def _background_playlist_download(session_id):
     """Download playlist songs sequentially with status updates."""
+    from app import create_app
     from app.services.playlist_download_service import playlist_download_service
     from app.downloader import YTMusicDownloader
     from app.models import Download
@@ -411,9 +527,28 @@ def _background_playlist_download(session_id):
     
     print(f"[PLAYLIST:{session_id}] Starting download of {session['total']} songs", flush=True)
     
+    app = create_app()
+
     for idx, song in enumerate(session['songs']):
         print(f"[PLAYLIST:{session_id}] Processing song {idx + 1}/{session['total']}: {song['title']}", flush=True)
-        
+
+        with app.app_context():
+            is_duplicate, _ = Download.check_duplicate(
+                title=song.get('title', ''),
+                video_id=song.get('id'),
+                artist=song.get('uploader'),
+                duration=song.get('duration'),
+            )
+        if is_duplicate:
+            playlist_download_service.update_song_status(
+                session_id,
+                song['id'],
+                'completed',
+                progress=100,
+            )
+            playlist_download_service.increment_completed(session_id)
+            continue
+
         playlist_download_service.update_song_status(
             session_id, song['id'], 'downloading', progress=0
         )
@@ -449,11 +584,14 @@ def _background_playlist_download(session_id):
                     thumbnail = f"https://i.ytimg.com/vi/{song['id']}/mqdefault.jpg"
                 
                 # Save to database with app context
-                from app import create_app
-                app = create_app()
                 with app.app_context():
-                    # Check if already exists
-                    if not Download.query.filter_by(video_id=song.get('id')).first():
+                    is_duplicate, _ = Download.check_duplicate(
+                        title=result.get('title') or song.get('title'),
+                        video_id=song.get('id') or result.get('id'),
+                        artist=result.get('uploader') or song.get('uploader'),
+                        duration=result.get('duration') or song.get('duration', 0),
+                    )
+                    if not is_duplicate:
                         Download.add(
                             video_id=song.get('id') or result.get('id'),
                             title=result.get('title') or song.get('title'),

@@ -4,6 +4,7 @@ Download model for storing download history.
 
 import os
 import re
+import threading
 from datetime import datetime
 from .database import db
 
@@ -24,6 +25,11 @@ class Download(db.Model):
     duration = db.Column(db.Integer, default=0)
     file_size = db.Column(db.Integer, default=0)
     downloaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # In-memory duplicate index for fast checks
+    _dup_cache_lock = threading.Lock()
+    _dup_cache = None
+    _dup_cache_count = -1
     
     def to_dict(self):
         """Convert to dictionary for JSON response."""
@@ -96,11 +102,143 @@ class Download(db.Model):
                 pass
         
         return None
+
+    @staticmethod
+    def _normalize_text(value):
+        """Normalize free text for stable duplicate comparisons."""
+        text = (value or '').lower()
+        if not text:
+            return ''
+
+        # Remove bracketed segments often used for noisy metadata tags.
+        text = re.sub(r'\([^)]*\)', ' ', text)
+        text = re.sub(r'\[[^\]]*\]', ' ', text)
+        text = re.sub(r'\{[^}]*\}', ' ', text)
+        text = text.replace('&', ' and ')
+        text = re.sub(r'[^a-z0-9\s]+', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
+    @classmethod
+    def _normalize_title(cls, title):
+        return cls._normalize_text(title)
+
+    @classmethod
+    def _normalize_artist(cls, artist):
+        return cls._normalize_text(artist)
+
+    @classmethod
+    def _duration_value(cls, duration):
+        try:
+            value = int(duration)
+            return value if value > 0 else 0
+        except Exception:
+            return 0
+
+    @classmethod
+    def _duration_match(cls, left, right, tolerance=3):
+        left_val = cls._duration_value(left)
+        right_val = cls._duration_value(right)
+        if left_val <= 0 or right_val <= 0:
+            return False
+        return abs(left_val - right_val) <= tolerance
+
+    @classmethod
+    def invalidate_duplicate_cache(cls):
+        """Invalidate in-memory duplicate index."""
+        with cls._dup_cache_lock:
+            cls._dup_cache = None
+            cls._dup_cache_count = -1
+
+    @classmethod
+    def _build_duplicate_cache(cls):
+        records = cls.query.with_entities(
+            cls.id,
+            cls.video_id,
+            cls.title,
+            cls.artist,
+            cls.filename,
+            cls.duration,
+        ).all()
+
+        by_video_id = {}
+        by_title = {}
+        by_title_artist = {}
+
+        for row in records:
+            title_norm = cls._normalize_title(row.title)
+            artist_norm = cls._normalize_artist(row.artist)
+            duration_val = cls._duration_value(row.duration)
+
+            entry = {
+                'id': row.id,
+                'video_id': row.video_id,
+                'title_norm': title_norm,
+                'artist_norm': artist_norm,
+                'filename': row.filename,
+                'duration': duration_val,
+            }
+
+            video_id = (row.video_id or '').strip()
+            if video_id and not video_id.startswith('local_'):
+                by_video_id.setdefault(video_id, []).append(entry)
+
+            if title_norm:
+                by_title.setdefault(title_norm, []).append(entry)
+                if artist_norm:
+                    by_title_artist.setdefault((title_norm, artist_norm), []).append(entry)
+
+        return {
+            'count': len(records),
+            'by_video_id': by_video_id,
+            'by_title': by_title,
+            'by_title_artist': by_title_artist,
+        }
+
+    @classmethod
+    def _ensure_duplicate_cache(cls):
+        current_count = cls.query.count()
+        with cls._dup_cache_lock:
+            if cls._dup_cache is None or cls._dup_cache_count != current_count:
+                cls._dup_cache = cls._build_duplicate_cache()
+                cls._dup_cache_count = cls._dup_cache.get('count', current_count)
+            return cls._dup_cache
+
+    @classmethod
+    def _delete_stale_records(cls, stale_ids):
+        if not stale_ids:
+            return
+        cls.query.filter(cls.id.in_(list(stale_ids))).delete(synchronize_session=False)
+        db.session.commit()
+        cls.invalidate_duplicate_cache()
+
+    @classmethod
+    def _is_same_track(cls, entry, title_norm, artist_norm, duration, video_id):
+        entry_video_id = (entry.get('video_id') or '').strip()
+        if video_id and entry_video_id and video_id == entry_video_id:
+            return True
+
+        if not title_norm or title_norm != entry.get('title_norm'):
+            return False
+
+        entry_artist = entry.get('artist_norm') or ''
+        artist_exact = bool(artist_norm and entry_artist and artist_norm == entry_artist)
+        artist_missing = not artist_norm or not entry_artist
+        duration_exact = cls._duration_match(duration, entry.get('duration'))
+        duration_unknown = cls._duration_value(duration) <= 0 or cls._duration_value(entry.get('duration')) <= 0
+
+        # Require multiple parameters to avoid false positives.
+        if artist_exact and (duration_exact or duration_unknown):
+            return True
+        if artist_missing and duration_exact:
+            return True
+        return False
     
     @classmethod
     def get_history(cls, limit=100):
         """Get download history with auto-sync from filesystem."""
         from config import config
+        changes_made = False
         
         # 1. Get all known files from DB
         db_records = cls.query.all()
@@ -119,6 +257,7 @@ class Download(db.Model):
         for filename, record in db_files.items():
             if filename not in disk_files:
                 db.session.delete(record)
+                changes_made = True
         
         # B. Add new files to DB (files on disk but not in DB)
         for filename in disk_files:
@@ -174,9 +313,12 @@ class Download(db.Model):
                     thumbnail=thumbnail
                 )
                 db.session.add(new_record)
+                changes_made = True
         
         try:
             db.session.commit()
+            if changes_made:
+                cls.invalidate_duplicate_cache()
         except Exception as e:
             print(f"DB sync error: {e}")
             db.session.rollback()
@@ -185,42 +327,59 @@ class Download(db.Model):
         return cls.query.order_by(cls.downloaded_at.desc()).limit(limit).all()
     
     @classmethod
-    def check_duplicate(cls, title, video_id=None):
-        """Check if a download already exists AND the file is still there."""
+    def check_duplicate(cls, title, video_id=None, artist=None, duration=None):
+        """
+        Fast multi-parameter duplicate check.
+
+        Priority:
+        1) Exact video_id match (indexed).
+        2) Strict normalized title + artist + duration-tolerant match.
+        """
         from config import config
-        
+
+        cache = cls._ensure_duplicate_cache()
+        video_id = (video_id or '').strip()
+        title_norm = cls._normalize_title(title)
+        artist_norm = cls._normalize_artist(artist)
+        duration_val = cls._duration_value(duration)
+
+        candidates = []
         if video_id and not video_id.startswith('local_'):
-            existing = cls.query.filter_by(video_id=video_id).first()
-            if existing:
-                # Check if file actually exists
-                if existing.filename:
-                    filepath = config.DOWNLOAD_DIR / existing.filename
-                    if filepath.exists():
-                        return True, existing.filename
-                    else:
-                        # File deleted, remove from DB
-                        db.session.delete(existing)
-                        db.session.commit()
-                        return False, None
-        
-        # Also check by title
-        if title:
-            existing = cls.query.filter(
-                cls.title.ilike(f"%{title}%")
-            ).first()
-            
-            if existing:
-                # Check if file actually exists
-                if existing.filename:
-                    filepath = config.DOWNLOAD_DIR / existing.filename
-                    if filepath.exists():
-                        return True, existing.filename
-                    else:
-                        # File deleted, remove from DB
-                        db.session.delete(existing)
-                        db.session.commit()
-                        return False, None
-        
+            candidates.extend(cache.get('by_video_id', {}).get(video_id, []))
+
+        if title_norm:
+            if artist_norm:
+                candidates.extend(cache.get('by_title_artist', {}).get((title_norm, artist_norm), []))
+            candidates.extend(cache.get('by_title', {}).get(title_norm, []))
+
+        if not candidates:
+            return False, None
+
+        seen_ids = set()
+        stale_ids = set()
+
+        for entry in candidates:
+            entry_id = entry.get('id')
+            if entry_id in seen_ids:
+                continue
+            seen_ids.add(entry_id)
+
+            if not cls._is_same_track(entry, title_norm, artist_norm, duration_val, video_id):
+                continue
+
+            filename = entry.get('filename') or ''
+            if not filename:
+                continue
+
+            filepath = config.DOWNLOAD_DIR / filename
+            if filepath.exists():
+                return True, filename
+
+            stale_ids.add(entry_id)
+
+        if stale_ids:
+            cls._delete_stale_records(stale_ids)
+
         return False, None
     
     @classmethod
@@ -230,6 +389,7 @@ class Download(db.Model):
             download = cls(**kwargs)
             db.session.add(download)
             db.session.commit()
+            cls.invalidate_duplicate_cache()
             return download
         except Exception as e:
             print(f"Error adding download: {e}")
@@ -256,6 +416,7 @@ class Download(db.Model):
         if download:
             db.session.delete(download)
             db.session.commit()
+            cls.invalidate_duplicate_cache()
             return True
         return False
     
@@ -266,6 +427,7 @@ class Download(db.Model):
         if download:
             db.session.delete(download)
             db.session.commit()
+            cls.invalidate_duplicate_cache()
             return True
         return False
     
@@ -274,6 +436,7 @@ class Download(db.Model):
         """Clear all download history."""
         cls.query.delete()
         db.session.commit()
+        cls.invalidate_duplicate_cache()
     
     @classmethod
     def get_by_video_id(cls, video_id):

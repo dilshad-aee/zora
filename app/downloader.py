@@ -10,6 +10,7 @@ Features:
 
 import os
 import shutil
+import glob
 from typing import Callable, Optional, List
 import yt_dlp
 
@@ -72,6 +73,82 @@ class YTMusicDownloader:
         """Check if FFmpeg is available."""
         if not shutil.which('ffmpeg'):
             raise FFmpegError()
+
+    def _audio_extension_priority(self) -> List[str]:
+        """Return preferred audio extensions in selection order."""
+        preferred = [
+            str(self.audio_format or '').lower().lstrip('.'),
+            'm4a',
+            'mp3',
+            'aac',
+            'ogg',
+            'opus',
+            'flac',
+            'wav',
+            'webm',
+            'mka',
+        ]
+        result = []
+        seen = set()
+        for ext in preferred:
+            if not ext or ext in seen:
+                continue
+            seen.add(ext)
+            result.append(ext)
+        return result
+
+    def _resolve_final_audio_path(self, info: dict, ydl: yt_dlp.YoutubeDL) -> Optional[str]:
+        """
+        Resolve the final post-processed audio filepath on disk.
+
+        yt-dlp progress hooks report the pre-conversion filename (often .webm).
+        This resolver finds the actual converted file (e.g. .m4a).
+        """
+        extension_priority = self._audio_extension_priority()
+        allowed_extensions = set(extension_priority)
+        candidates = []
+
+        try:
+            prepared = ydl.prepare_filename(info)
+            base = os.path.splitext(prepared)[0]
+            for ext in extension_priority:
+                candidates.append(f"{base}.{ext}")
+            candidates.append(prepared)
+        except Exception:
+            pass
+
+        video_id = info.get('id')
+        if video_id:
+            pattern = os.path.join(self.output_dir, f"* [{video_id}].*")
+            candidates.extend(glob.glob(pattern))
+
+        seen = set()
+        existing_audio_files = []
+        for candidate in candidates:
+            abs_path = os.path.abspath(candidate)
+            if abs_path in seen:
+                continue
+            seen.add(abs_path)
+
+            if not os.path.isfile(abs_path):
+                continue
+
+            ext = os.path.splitext(abs_path)[1].lower().lstrip('.')
+            if ext in allowed_extensions:
+                existing_audio_files.append(abs_path)
+
+        if not existing_audio_files:
+            return None
+
+        def rank(path: str) -> int:
+            ext = os.path.splitext(path)[1].lower().lstrip('.')
+            try:
+                return extension_priority.index(ext)
+            except ValueError:
+                return len(extension_priority)
+
+        existing_audio_files.sort(key=rank)
+        return existing_audio_files[0]
     
     def _get_ydl_opts(self, playlist_mode: bool = False) -> dict:
         """
@@ -103,9 +180,6 @@ class YTMusicDownloader:
                 {
                     'key': 'FFmpegMetadata',
                     'add_metadata': True,
-                },
-                {
-                    'key': 'EmbedThumbnail',
                 },
             ],
             
@@ -152,9 +226,6 @@ class YTMusicDownloader:
                 filename = d.get('filename')
                 if not filename:
                     return
-                
-                # Capture filename for return value
-                self._captured_filename = filename
                 
                 # Get info dict for ID
                 info = d.get('info_dict', {})
@@ -253,11 +324,9 @@ class YTMusicDownloader:
                 info = ydl.extract_info(url, download=True)
                 
                 if info:
-                    # Use captured filename from hook if available, otherwise prepare it
-                    final_filename = getattr(self, '_captured_filename', None)
+                    final_filename = self._resolve_final_audio_path(info, ydl)
                     if not final_filename:
                         final_filename = ydl.prepare_filename(info)
-                        # Adjust extension if needed (simple heuristic)
                         if self.audio_format and not final_filename.endswith(f".{self.audio_format}"):
                             base = os.path.splitext(final_filename)[0]
                             final_filename = f"{base}.{self.audio_format}"

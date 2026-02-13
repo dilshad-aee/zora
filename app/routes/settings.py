@@ -26,6 +26,7 @@ def update_settings():
         'default_format': data.get('default_format', 'm4a'),
         'default_quality': data.get('default_quality', '320'),
         'check_duplicates': str(data.get('check_duplicates', True)).lower(),
+        'skip_duplicates': str(data.get('skip_duplicates', True)).lower(),
     }
     
     updated = Settings.update_all(settings_data)

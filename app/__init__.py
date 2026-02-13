@@ -37,11 +37,13 @@ def create_app():
     from app.routes.api import bp as api_bp
     from app.routes.queue import bp as queue_bp
     from app.routes.history import bp as history_bp
+    from app.routes.playlists import bp as playlists_bp
     from app.routes.settings import bp as settings_bp
     
     app.register_blueprint(api_bp)
     app.register_blueprint(queue_bp, url_prefix='/api/queue')
     app.register_blueprint(history_bp, url_prefix='/api')
+    app.register_blueprint(playlists_bp, url_prefix='/api')
     app.register_blueprint(settings_bp, url_prefix='/api')
     
     return app

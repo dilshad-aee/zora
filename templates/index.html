@@ -46,20 +46,24 @@
             </div>
             
             <nav class="sidebar__nav">
-                <a class="nav-link active" onclick="showView('download'); closeSidebar();">
+                <a class="nav-link active" data-view="download" onclick="showView('download'); closeSidebar();">
                     <i class="fas fa-download"></i>
                     <span>Download</span>
                 </a>
-                <a class="nav-link" onclick="showView('library'); closeSidebar();">
+                <a class="nav-link" data-view="library" onclick="showView('library'); closeSidebar();">
                     <i class="fas fa-music"></i>
                     <span>My Music</span>
                 </a>
-                <a class="nav-link" onclick="showView('queue'); closeSidebar();">
+                <a class="nav-link" data-view="playlists" onclick="showView('playlists'); closeSidebar();">
+                    <i class="fas fa-list-music"></i>
+                    <span>Playlists</span>
+                </a>
+                <a class="nav-link" data-view="queue" onclick="showView('queue'); closeSidebar();">
                     <i class="fas fa-list"></i>
                     <span>Queue</span>
                     <span class="nav-badge" id="queueBadge" style="display: none;">0</span>
                 </a>
-                <a class="nav-link" onclick="showView('playlist-downloads'); closeSidebar();">
+                <a class="nav-link" data-view="playlist-downloads" onclick="showView('playlist-downloads'); closeSidebar();">
                     <i class="fas fa-download"></i>
                     <span>Playlist Downloads</span>
                     <span class="nav-badge" id="playlistDownloadBadge" style="display: none;">0</span>
@@ -284,6 +288,85 @@
                         <i class="fas fa-music"></i>
                         <h3>No songs yet</h3>
                         <p>Downloaded songs will appear here</p>
+                    </div>
+                </div>
+                <div class="library-load-status hidden" id="libraryLoadStatus"></div>
+                <div class="library-load-trigger hidden" id="libraryLoadTrigger" aria-hidden="true"></div>
+            </div>
+
+            <!-- PLAYLISTS VIEW -->
+            <div class="view hidden" id="playlistsView">
+                <h1 class="page-title">
+                    <i class="fas fa-list-music"></i> My Playlists
+                </h1>
+
+                <div class="playlists-layout">
+                    <div class="playlists-panel">
+                        <div class="playlists-create">
+                            <input type="text"
+                                   id="newPlaylistName"
+                                   class="form-input"
+                                   placeholder="Create a playlist..."
+                                   maxlength="120"
+                                   onkeypress="if (event.key === 'Enter') createPlaylist()">
+                            <button class="btn btn--primary btn--small" onclick="createPlaylist()">
+                                <i class="fas fa-plus"></i>
+                                <span>Create</span>
+                            </button>
+                        </div>
+
+                        <div id="playlistsList" class="playlists-list">
+                            <div class="empty-state">
+                                <i class="fas fa-list-music"></i>
+                                <h3>No playlists yet</h3>
+                                <p>Create a playlist to organize your downloaded songs</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="playlists-panel playlists-panel--songs">
+                        <div class="playlists-panel__header">
+                            <h2 id="selectedPlaylistName">Select a playlist</h2>
+                            <button class="btn btn--danger btn--small"
+                                    id="deletePlaylistBtn"
+                                    style="display: none;"
+                                    onclick="deleteSelectedPlaylist()">
+                                <i class="fas fa-trash"></i>
+                                <span class="btn-text">Delete</span>
+                            </button>
+                        </div>
+                        <p class="text-muted" id="selectedPlaylistMeta">Choose a playlist to see songs</p>
+                        <div class="playlist-playback-controls">
+                            <button class="btn btn--primary btn--small"
+                                    id="playlistPlayAllBtn"
+                                    onclick="playSelectedPlaylist(false)"
+                                    disabled>
+                                <i class="fas fa-play"></i>
+                                <span>Play All</span>
+                            </button>
+                            <button class="btn btn--secondary btn--small"
+                                    id="playlistShuffleBtn"
+                                    onclick="playSelectedPlaylist(true)"
+                                    disabled>
+                                <i class="fas fa-random"></i>
+                                <span>Shuffle</span>
+                            </button>
+                            <button class="btn btn--secondary btn--small playlist-loop-btn"
+                                    id="playlistLoopBtn"
+                                    onclick="togglePlaylistLoop()"
+                                    disabled>
+                                <i class="fas fa-repeat"></i>
+                                <span>Loop: Off</span>
+                            </button>
+                        </div>
+
+                        <div id="playlistSongsList" class="playlist-songs-list">
+                            <div class="empty-state">
+                                <i class="fas fa-music"></i>
+                                <h3>No playlist selected</h3>
+                                <p>Pick a playlist from the left panel</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -523,9 +606,9 @@
                 </div>
                 <div class="form-group">
                     <label class="checkbox-label">
-                        <input type="checkbox" id="settingsDuplicates" checked>
+                        <input type="checkbox" id="settingsDuplicates" checked disabled>
                         <span class="checkbox-custom"></span>
-                        Warn about duplicate downloads
+                        Prevent duplicate downloads (always on)
                     </label>
                 </div>
                 <div class="form-group">
@@ -561,6 +644,36 @@
                     <i class="fas fa-times"></i> Cancel Timer
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Add To Playlist Modal -->
+    <div class="modal-overlay hidden" id="addToPlaylistModal" onclick="closeAddToPlaylistModalOnOverlay(event)">
+        <div class="modal modal--compact" onclick="event.stopPropagation()">
+            <div class="modal__header">
+                <h2><i class="fas fa-list-music"></i> Add to Playlist</h2>
+                <button class="modal__close" onclick="closeAddToPlaylistModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="form-group">
+                <label>Create New Playlist</label>
+                <div class="playlists-create playlists-create--modal">
+                    <input type="text"
+                           id="modalPlaylistName"
+                           class="form-input"
+                           placeholder="Playlist name..."
+                           maxlength="120"
+                           onkeypress="if (event.key === 'Enter') createPlaylistFromModal()">
+                    <button class="btn btn--primary btn--small" onclick="createPlaylistFromModal()">
+                        <i class="fas fa-plus"></i>
+                        <span>Create</span>
+                    </button>
+                </div>
+            </div>
+
+            <div id="addToPlaylistOptions" class="add-to-playlist-options"></div>
         </div>
     </div>
     
@@ -666,6 +779,7 @@
             const viewMap = {
                 'download': 0,
                 'library': 1,
+                'playlists': 1,
                 'queue': 2,
                 'playlist-downloads': 2
             };

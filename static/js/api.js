@@ -66,11 +66,22 @@ const API = {
     /**
      * Add to queue
      */
-    async addToQueue(url, title, thumbnail, format, quality) {
+    async addToQueue(url, title, thumbnail, format, quality, metadata = {}) {
+        const payload = {
+            url,
+            title,
+            thumbnail,
+            format,
+            quality,
+            video_id: metadata.video_id || '',
+            artist: metadata.artist || '',
+            duration: metadata.duration || 0
+        };
+
         const response = await fetch('/api/queue/add', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, title, thumbnail, format, quality })
+            body: JSON.stringify(payload)
         });
 
         const data = await response.json();
@@ -113,6 +124,83 @@ const API = {
      */
     async clearHistory() {
         await fetch('/api/history/clear', { method: 'POST' });
+    },
+
+    /**
+     * Delete one song from history and filesystem
+     */
+    async deleteHistoryItem(downloadId) {
+        const response = await fetch(`/api/history/delete/${downloadId}`, { method: 'POST' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to delete song');
+        return data;
+    },
+
+    /**
+     * List user playlists
+     */
+    async getPlaylists() {
+        const response = await fetch('/api/playlists');
+        return response.json();
+    },
+
+    /**
+     * Create a playlist
+     */
+    async createPlaylist(name) {
+        const response = await fetch('/api/playlists', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to create playlist');
+        return data;
+    },
+
+    /**
+     * Delete a playlist
+     */
+    async deletePlaylist(playlistId) {
+        const response = await fetch(`/api/playlists/${playlistId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to delete playlist');
+        return data;
+    },
+
+    /**
+     * Get songs in a playlist
+     */
+    async getPlaylistSongs(playlistId) {
+        const response = await fetch(`/api/playlists/${playlistId}/songs`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load playlist songs');
+        return data;
+    },
+
+    /**
+     * Add a downloaded song to playlist
+     */
+    async addSongToPlaylist(playlistId, downloadId) {
+        const response = await fetch(`/api/playlists/${playlistId}/songs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ download_id: downloadId })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to add song');
+        return data;
+    },
+
+    /**
+     * Remove a song from playlist
+     */
+    async removeSongFromPlaylist(playlistId, downloadId) {
+        const response = await fetch(`/api/playlists/${playlistId}/songs/${downloadId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to remove song');
+        return data;
     },
 
     /**

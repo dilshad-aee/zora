@@ -27,14 +27,26 @@ class QueueService:
         self.queue_lock = threading.Lock()
         self.is_processing = False
     
-    def add(self, url: str, title: str, thumbnail: str = '', 
-            audio_format: str = 'm4a', quality: str = '320') -> dict:
+    def add(
+        self,
+        url: str,
+        title: str,
+        thumbnail: str = '',
+        audio_format: str = 'm4a',
+        quality: str = '320',
+        video_id: str = '',
+        artist: str = '',
+        duration: int = 0,
+    ) -> dict:
         """Add item to queue."""
         item = {
             'id': str(uuid.uuid4())[:8],
             'url': url,
             'title': title,
             'thumbnail': thumbnail,
+            'video_id': video_id,
+            'artist': artist,
+            'duration': duration,
             'format': audio_format.upper(),
             'quality': f'{quality}kbps',
             'status': 'queued',
@@ -117,7 +129,11 @@ class QueueService:
     
     def _process_queue(self):
         """Process queue items sequentially."""
+        from app import create_app
         from app.downloader import YTMusicDownloader
+        from app.models import Download
+
+        app = create_app()
         
         while True:
             with self.queue_lock:
@@ -129,6 +145,34 @@ class QueueService:
             
             item['status'] = 'downloading'
             job_id = item['id']
+
+            with app.app_context():
+                is_duplicate, existing_file = Download.check_duplicate(
+                    title=item.get('title', ''),
+                    video_id=item.get('video_id'),
+                    artist=item.get('artist'),
+                    duration=item.get('duration'),
+                )
+                if is_duplicate:
+                    self.active_downloads[job_id] = {
+                        'id': job_id,
+                        'url': item['url'],
+                        'status': 'skipped',
+                        'progress': 100,
+                        'title': item['title'],
+                        'thumbnail': item['thumbnail'],
+                        'format': item['format'],
+                        'quality': item['quality'],
+                        'output_dir': str(config.DOWNLOAD_DIR),
+                        'existing_file': existing_file,
+                        'completed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    }
+                    item['status'] = 'skipped'
+
+                    with self.queue_lock:
+                        if self.queue and self.queue[0]['id'] == item['id']:
+                            self.queue.pop(0)
+                    continue
             
             try:
                 self.active_downloads[job_id] = {
@@ -138,6 +182,9 @@ class QueueService:
                     'progress': 0,
                     'title': item['title'],
                     'thumbnail': item['thumbnail'],
+                    'video_id': item.get('video_id'),
+                    'artist': item.get('artist'),
+                    'duration': item.get('duration'),
                     'format': item['format'],
                     'quality': item['quality'],
                     'output_dir': str(config.DOWNLOAD_DIR),

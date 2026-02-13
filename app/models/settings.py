@@ -19,6 +19,7 @@ class Settings(db.Model):
         'default_format': 'm4a',
         'default_quality': '320',
         'check_duplicates': 'true',
+        'skip_duplicates': 'true',
         'theme': 'dark',
     }
     
@@ -54,6 +55,11 @@ class Settings(db.Model):
             settings['check_duplicates'] = True
         else:
             settings['check_duplicates'] = False
+
+        if settings.get('skip_duplicates') in ['true', 'True', '1']:
+            settings['skip_duplicates'] = True
+        else:
+            settings['skip_duplicates'] = False
         
         return settings
     

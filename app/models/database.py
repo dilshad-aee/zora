@@ -13,7 +13,7 @@ def init_db(app):
     
     with app.app_context():
         # Import models to register them
-        from . import download, settings
+        from . import download, settings, playlist
         
         # Create all tables
         db.create_all()

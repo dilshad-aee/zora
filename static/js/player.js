@@ -637,17 +637,18 @@ const Player = {
      * Play previous track in queue
      */
     playPrevious() {
-        if (this.currentTrackIndex > 0) {
-            if (typeof window.playTrackAtIndex === 'function') {
-                window.playTrackAtIndex(this.currentTrackIndex - 1);
-            } else if (typeof window.playNextTrack === 'function') {
-                // Fallback: restart current track if no previous function
-                if (this.audio) {
-                    this.audio.currentTime = 0;
-                }
-            }
-        } else if (this.audio) {
-            // At first track, just restart it
+        if (typeof window.playPreviousTrack === 'function') {
+            window.playPreviousTrack();
+            return;
+        }
+
+        if (typeof window.playTrackAtIndex === 'function' && Number.isFinite(this.currentTrackIndex) && this.currentTrackIndex > 0) {
+            window.playTrackAtIndex(this.currentTrackIndex - 1);
+            return;
+        }
+
+        if (this.audio) {
+            // Fallback: restart current track
             this.audio.currentTime = 0;
         }
     },
@@ -1109,6 +1110,9 @@ const Player = {
         this.updateShuffleButton();
         this.updateNowPlayingButtons();
         this.saveSettings();
+        if (typeof window.updatePlaylistPlaybackControls === 'function') {
+            window.updatePlaylistPlaybackControls();
+        }
         this.showToast(this.shuffle ? 'Shuffle on' : 'Shuffle off');
     },
 
@@ -1136,6 +1140,9 @@ const Player = {
         this.updateRepeatButton();
         this.updateNowPlayingButtons();
         this.saveSettings();
+        if (typeof window.updatePlaylistPlaybackControls === 'function') {
+            window.updatePlaylistPlaybackControls();
+        }
 
         const messages = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
         this.showToast(messages[this.repeat]);

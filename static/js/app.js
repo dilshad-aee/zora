@@ -16,6 +16,27 @@ const State = {
     lastDownloaded: null,
     downloads: [],
     queue: [],
+    queueActive: [],
+    queuePollInterval: null,
+    queuePollBusy: false,
+    queueJobStates: {},
+    playlists: {
+        items: [],
+        selectedId: null,
+        songs: [],
+        addModalSongId: null
+    },
+    playback: {
+        queue: [],
+        source: 'library',
+        playlistId: null
+    },
+    library: {
+        batchSize: 24,
+        visibleCount: 0,
+        observer: null,
+        scrollListenerAttached: false
+    },
     playlist: {
         items: [],
         selected: new Set()
@@ -40,6 +61,7 @@ async function init() {
 
     // Setup event listeners
     setupEventListeners();
+    setupLibraryLazyLoading();
     
     // Adjust main content padding based on player height
     adjustMainPadding();
@@ -56,7 +78,9 @@ async function init() {
     // Load data
     await loadSettings();
     await loadHistory();
+    await loadPlaylists();
     await loadQueue();
+    startQueuePolling();
 }
 
 function setupEventListeners() {
@@ -136,9 +160,17 @@ async function handleMainAction() {
     }
 
     const isUrl = input.includes('youtube.com') || input.includes('youtu.be') || input.includes('music.youtube');
-    const isPlaylistUrl = input.includes('list=');
+    const isPlaylistUrl = isUrl && (input.includes('list=') || input.includes('/playlist'));
 
-    if (State.mode === 'playlist' || (isUrl && isPlaylistUrl)) {
+    // If playlist tab is active but URL is a single video, gracefully fall back.
+    if (State.mode === 'playlist' && isUrl && !isPlaylistUrl) {
+        switchTab('url');
+        UI.toast('Detected a single video URL. Switched to URL mode.', 'success');
+        await fetchVideoInfo(input);
+        return;
+    }
+
+    if (State.mode === 'playlist' || isPlaylistUrl) {
         await fetchPlaylistInfo(input);
     } else if (State.mode === 'url' || isUrl) {
         await fetchVideoInfo(input);
@@ -236,6 +268,11 @@ async function fetchPlaylistInfo(url) {
 }
 
 function showPlaylistPreview(data) {
+    if (!Array.isArray(data.entries) || data.entries.length === 0) {
+        UI.toast('No songs found in this playlist. Please verify the playlist URL.', 'error');
+        return;
+    }
+
     State.playlist.items = data.entries;
     State.playlist.selected = new Set(data.entries.map(item => item.id));
 
@@ -384,7 +421,7 @@ function showDownloadReady(info, url) {
     const views = info.view_count ? `<i class="fas fa-eye"></i> ${UI.formatNumber(info.view_count)} views` : '';
     UI.setElement('previewViews', 'innerHTML', views);
 
-    UI.toggle('duplicateWarning', info.is_duplicate);
+    UI.toggle('duplicateWarning', false);
 
     State.currentVideo = { ...info, url };
     UI.show('downloadReady');
@@ -411,14 +448,13 @@ async function startDownload(force = false) {
             force
         );
 
+        if (result.skipped_duplicate) {
+            UI.hide('downloadReady');
+            return;
+        }
+
         if (result.isDuplicate) {
-            if (confirm(`"${result.title}" already exists.\n\nDownload anyway?`)) {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-download"></i> Download Now';
-                return startDownload(true);
-            }
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-download"></i> Download Now';
+            UI.hide('downloadReady');
             return;
         }
 
@@ -480,7 +516,16 @@ function onDownloadComplete(data) {
     UI.setElement('successTitle', 'textContent', `"${data.title}" has been downloaded`);
 
     State.downloads.unshift(data);
+    State.library.visibleCount = Math.min(
+        State.library.visibleCount + 1,
+        State.downloads.length
+    );
     updateLibrary();
+
+    // Reload from DB so newly downloaded items get their real record id.
+    loadHistory().catch((error) => {
+        console.error('Failed to refresh history after download:', error);
+    });
 
     UI.show('successSection');
     UI.toast('Download complete!', 'success');
@@ -518,11 +563,22 @@ async function addToQueue() {
             State.currentVideo.title,
             State.currentVideo.thumbnail,
             State.format,
-            State.quality
+            State.quality,
+            {
+                video_id: State.currentVideo.id || '',
+                artist: State.currentVideo.uploader || '',
+                duration: State.currentVideo.duration || 0
+            }
         );
+
+        if (result.skipped_duplicate) {
+            UI.hide('downloadReady');
+            return;
+        }
 
         State.queue.push(result.queue_item);
         updateQueueBadge();
+        startQueuePolling();
         UI.toast(`Added to queue (position ${result.position})`, 'success');
         UI.hide('downloadReady');
 
@@ -534,19 +590,93 @@ async function addToQueue() {
 async function loadQueue() {
     try {
         const data = await API.getQueue();
-        State.queue = data.queue || [];
-        updateQueueBadge();
-        updateQueueView();
+        applyQueueState(data, { notifyTransitions: false });
     } catch (error) {
         console.error('Failed to load queue:', error);
     }
 }
 
+function applyQueueState(data, options = {}) {
+    const notifyTransitions = options.notifyTransitions === true;
+    const queue = Array.isArray(data?.queue) ? data.queue : [];
+    const activeJobs = Array.isArray(data?.active) ? data.active : [];
+
+    State.queue = queue;
+    State.queueActive = activeJobs;
+    updateQueueBadge();
+    updateQueueView();
+
+    let shouldRefreshHistory = false;
+    const nextStates = {};
+    for (const job of activeJobs) {
+        const jobId = String(job?.id || '');
+        const status = String(job?.status || 'unknown');
+        if (!jobId) continue;
+
+        const previousStatus = State.queueJobStates[jobId];
+        nextStates[jobId] = status;
+
+        if (!notifyTransitions || previousStatus === undefined || previousStatus === status) {
+            continue;
+        }
+
+        if (status === 'completed') {
+            shouldRefreshHistory = true;
+            UI.toast(`Queue download completed: ${job.title || 'Song'}`, 'success');
+        } else if (status === 'error') {
+            UI.toast(`Queue download failed: ${job.title || 'Song'}`, 'error');
+        }
+    }
+
+    State.queueJobStates = { ...State.queueJobStates, ...nextStates };
+
+    if (shouldRefreshHistory) {
+        loadHistory().catch((error) => {
+            console.error('Failed to refresh history after queue completion:', error);
+        });
+    }
+}
+
+async function pollQueueState() {
+    if (State.queuePollBusy) return;
+    State.queuePollBusy = true;
+
+    try {
+        const data = await API.getQueue();
+        applyQueueState(data, { notifyTransitions: true });
+    } catch (error) {
+        console.error('Queue polling error:', error);
+    } finally {
+        State.queuePollBusy = false;
+    }
+}
+
+function startQueuePolling() {
+    if (State.queuePollInterval) return;
+
+    pollQueueState().catch((error) => {
+        console.error('Initial queue poll failed:', error);
+    });
+
+    State.queuePollInterval = setInterval(() => {
+        pollQueueState().catch((error) => {
+            console.error('Queue polling tick failed:', error);
+        });
+    }, 1500);
+}
+
 function updateQueueBadge() {
     const badge = document.getElementById('queueBadge');
+    const mobileBadge = document.getElementById('mobileQueueBadge');
+
     if (badge) {
         badge.textContent = State.queue.length;
         badge.style.display = State.queue.length > 0 ? 'inline' : 'none';
+    }
+
+    if (mobileBadge) {
+        mobileBadge.textContent = State.queue.length;
+        mobileBadge.style.display = State.queue.length > 0 ? 'inline' : 'none';
     }
 }
 
@@ -610,20 +740,618 @@ async function clearQueue() {
     }
 }
 
+// ==================== Playlists ====================
+function getSelectedPlaylist() {
+    return State.playlists.items.find(p => Number(p.id) === Number(State.playlists.selectedId)) || null;
+}
+
+async function loadPlaylists(keepSelection = true) {
+    try {
+        const previousSelected = State.playlists.selectedId;
+        const data = await API.getPlaylists();
+        State.playlists.items = Array.isArray(data) ? data : [];
+
+        const hasSelected = State.playlists.items.some(
+            p => Number(p.id) === Number(State.playlists.selectedId)
+        );
+
+        if (!keepSelection || !hasSelected) {
+            State.playlists.selectedId = State.playlists.items[0]?.id || null;
+        }
+
+        renderPlaylistsList();
+        renderAddToPlaylistOptions();
+        updatePlaylistPlaybackControls();
+
+        if (State.playlists.selectedId) {
+            if (
+                Number(previousSelected) !== Number(State.playlists.selectedId)
+                || State.playlists.songs.length === 0
+            ) {
+                await loadSelectedPlaylistSongs();
+            } else {
+                renderSelectedPlaylistPanel();
+            }
+        } else {
+            State.playlists.songs = [];
+            renderSelectedPlaylistPanel();
+        }
+    } catch (error) {
+        console.error('Failed to load playlists:', error);
+    }
+}
+
+function renderPlaylistsList() {
+    const list = document.getElementById('playlistsList');
+    if (!list) return;
+
+    if (!State.playlists.items.length) {
+        list.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-list-music"></i>
+                <h3>No playlists yet</h3>
+                <p>Create a playlist to organize your downloaded songs</p>
+            </div>
+        `;
+        return;
+    }
+
+    list.innerHTML = State.playlists.items.map(playlist => {
+        const isActive = Number(playlist.id) === Number(State.playlists.selectedId);
+        return `
+            <div class="playlist-list-item ${isActive ? 'playlist-list-item--active' : ''}"
+                 onclick="selectPlaylist(${playlist.id})">
+                <span class="playlist-list-item__name">${UI.escapeHtml(playlist.name || 'Untitled')}</span>
+                <span class="playlist-list-item__meta">${playlist.song_count || 0} song${(playlist.song_count || 0) !== 1 ? 's' : ''}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderSelectedPlaylistPanel() {
+    const titleEl = document.getElementById('selectedPlaylistName');
+    const metaEl = document.getElementById('selectedPlaylistMeta');
+    const listEl = document.getElementById('playlistSongsList');
+    const deleteBtn = document.getElementById('deletePlaylistBtn');
+    if (!titleEl || !metaEl || !listEl || !deleteBtn) return;
+
+    const playlist = getSelectedPlaylist();
+    if (!playlist) {
+        titleEl.textContent = 'Select a playlist';
+        metaEl.textContent = 'Choose a playlist to see songs';
+        deleteBtn.style.display = 'none';
+        listEl.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-music"></i>
+                <h3>No playlist selected</h3>
+                <p>Pick a playlist from the left panel</p>
+            </div>
+        `;
+        updatePlaylistPlaybackControls();
+        return;
+    }
+
+    titleEl.textContent = playlist.name || 'Playlist';
+    metaEl.textContent = `${State.playlists.songs.length} song${State.playlists.songs.length !== 1 ? 's' : ''}`;
+    deleteBtn.style.display = 'inline-flex';
+
+    if (!State.playlists.songs.length) {
+        listEl.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-music"></i>
+                <h3>No songs in this playlist</h3>
+                <p>Go to My Music and use the + button on a song to add it</p>
+            </div>
+        `;
+        updatePlaylistPlaybackControls();
+        return;
+    }
+
+    const playingSongId = getCurrentPlaybackSongId();
+    listEl.innerHTML = State.playlists.songs.map(song => {
+        const songId = Number(song.id);
+        const title = song.title || 'Unknown Title';
+        const artist = song.artist || song.uploader || 'Unknown Artist';
+        const thumbnail = song.thumbnail || '';
+        const isPlaying = Number.isFinite(songId) && Number(playingSongId) === songId;
+
+        return `
+            <div class="playlist-song-item ${isPlaying ? 'playlist-song-item--playing' : ''}">
+                <img src="${thumbnail}" alt="" class="playlist-song-item__thumb" onerror="this.src='/static/images/default-album.png'">
+                <div class="playlist-song-item__info">
+                    <div class="playlist-song-item__title">${UI.escapeHtml(title)}</div>
+                    <div class="playlist-song-item__artist">${UI.escapeHtml(artist)}</div>
+                </div>
+                <div class="playlist-song-item__actions">
+                    <button class="btn btn--icon"
+                            title="Play"
+                            onclick="playPlaylistSong(${songId})">
+                        <i class="fas fa-play"></i>
+                    </button>
+                    <button class="btn btn--icon"
+                            title="Remove from playlist"
+                            onclick="removeSongFromSelectedPlaylist(${songId})">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    updatePlaylistPlaybackControls();
+}
+
+async function selectPlaylist(playlistId) {
+    const selected = Number(playlistId);
+    if (!Number.isFinite(selected) || selected <= 0) return;
+
+    State.playlists.selectedId = selected;
+    renderPlaylistsList();
+    await loadSelectedPlaylistSongs();
+}
+
+async function loadSelectedPlaylistSongs() {
+    if (!State.playlists.selectedId) {
+        State.playlists.songs = [];
+        renderSelectedPlaylistPanel();
+        return;
+    }
+
+    try {
+        const response = await API.getPlaylistSongs(State.playlists.selectedId);
+        State.playlists.songs = Array.isArray(response.songs) ? response.songs : [];
+
+        const updatedPlaylist = response.playlist;
+        if (updatedPlaylist && updatedPlaylist.id) {
+            const idx = State.playlists.items.findIndex(
+                p => Number(p.id) === Number(updatedPlaylist.id)
+            );
+            if (idx !== -1) {
+                State.playlists.items[idx] = { ...State.playlists.items[idx], ...updatedPlaylist };
+            }
+        }
+
+        renderPlaylistsList();
+        renderSelectedPlaylistPanel();
+    } catch (error) {
+        console.error('Failed to load selected playlist songs:', error);
+        UI.toast(error.message || 'Failed to load playlist songs', 'error');
+    }
+}
+
+async function createPlaylist() {
+    const input = document.getElementById('newPlaylistName');
+    const name = input?.value?.trim() || '';
+    if (!name) {
+        UI.toast('Enter a playlist name', 'error');
+        return;
+    }
+
+    try {
+        const created = await API.createPlaylist(name);
+        if (input) input.value = '';
+        await loadPlaylists(true);
+        await selectPlaylist(created.id);
+        UI.toast('Playlist created', 'success');
+    } catch (error) {
+        UI.toast(error.message || 'Failed to create playlist', 'error');
+    }
+}
+
+async function deleteSelectedPlaylist() {
+    const playlist = getSelectedPlaylist();
+    if (!playlist) return;
+
+    if (!confirm(`Delete playlist "${playlist.name}"?`)) return;
+
+    try {
+        await API.deletePlaylist(playlist.id);
+        State.playlists.selectedId = null;
+        State.playlists.songs = [];
+        await loadPlaylists(false);
+        UI.toast('Playlist deleted', 'success');
+    } catch (error) {
+        UI.toast(error.message || 'Failed to delete playlist', 'error');
+    }
+}
+
+async function removeSongFromSelectedPlaylist(downloadId) {
+    const playlist = getSelectedPlaylist();
+    if (!playlist) return;
+
+    try {
+        await API.removeSongFromPlaylist(playlist.id, downloadId);
+        State.playlists.songs = State.playlists.songs.filter(s => Number(s.id) !== Number(downloadId));
+        if (State.playback.source === 'playlist' && Number(State.playback.playlistId) === Number(playlist.id)) {
+            prunePlaybackQueueAfterDelete(downloadId, '');
+        }
+        renderSelectedPlaylistPanel();
+        await loadPlaylists(true);
+        UI.toast('Removed from playlist', 'success');
+    } catch (error) {
+        UI.toast(error.message || 'Failed to remove song', 'error');
+    }
+}
+
+async function openAddToPlaylistModal(event, downloadId) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    const id = Number(downloadId);
+    if (!Number.isFinite(id) || id <= 0) {
+        UI.toast('Invalid song id', 'error');
+        return;
+    }
+
+    State.playlists.addModalSongId = id;
+    const modalNameInput = document.getElementById('modalPlaylistName');
+    if (modalNameInput) modalNameInput.value = '';
+
+    UI.show('addToPlaylistModal');
+    await loadPlaylists(true);
+    renderAddToPlaylistOptions();
+}
+
+function closeAddToPlaylistModal() {
+    UI.hide('addToPlaylistModal');
+    State.playlists.addModalSongId = null;
+}
+
+function closeAddToPlaylistModalOnOverlay(event) {
+    if (event?.target?.id === 'addToPlaylistModal') {
+        closeAddToPlaylistModal();
+    }
+}
+
+function renderAddToPlaylistOptions() {
+    const container = document.getElementById('addToPlaylistOptions');
+    if (!container) return;
+
+    if (!State.playlists.items.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-list-music"></i>
+                <h3>No playlists available</h3>
+                <p>Create one above, then add this song</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = State.playlists.items.map(playlist => `
+        <div class="add-to-playlist-option">
+            <span class="add-to-playlist-option__name">${UI.escapeHtml(playlist.name || 'Untitled')}</span>
+            <button class="btn btn--secondary btn--small" onclick="addCurrentSongToPlaylist(${playlist.id})">
+                <i class="fas fa-plus"></i>
+                <span>Add</span>
+            </button>
+        </div>
+    `).join('');
+}
+
+async function addCurrentSongToPlaylist(playlistId) {
+    const downloadId = Number(State.playlists.addModalSongId);
+    if (!Number.isFinite(downloadId) || downloadId <= 0) {
+        UI.toast('No song selected', 'error');
+        return;
+    }
+
+    try {
+        await API.addSongToPlaylist(playlistId, downloadId);
+        await loadPlaylists(true);
+        if (Number(State.playlists.selectedId) === Number(playlistId)) {
+            await loadSelectedPlaylistSongs();
+        }
+        closeAddToPlaylistModal();
+        UI.toast('Added to playlist', 'success');
+    } catch (error) {
+        UI.toast(error.message || 'Failed to add song', 'error');
+    }
+}
+
+async function createPlaylistFromModal() {
+    const input = document.getElementById('modalPlaylistName');
+    const name = input?.value?.trim() || '';
+    if (!name) {
+        UI.toast('Enter a playlist name', 'error');
+        return;
+    }
+
+    try {
+        const created = await API.createPlaylist(name);
+        if (input) input.value = '';
+        await loadPlaylists(true);
+        await addCurrentSongToPlaylist(created.id);
+    } catch (error) {
+        UI.toast(error.message || 'Failed to create playlist', 'error');
+    }
+}
+
+function updatePlaylistPlaybackControls() {
+    const playAllBtn = document.getElementById('playlistPlayAllBtn');
+    const shuffleBtn = document.getElementById('playlistShuffleBtn');
+    const loopBtn = document.getElementById('playlistLoopBtn');
+    if (!playAllBtn || !shuffleBtn || !loopBtn) return;
+
+    const hasPlaylist = Boolean(getSelectedPlaylist());
+    const playableSongs = buildSelectedPlaylistPlaybackQueue().length;
+    const canPlay = hasPlaylist && playableSongs > 0;
+
+    playAllBtn.disabled = !canPlay;
+    shuffleBtn.disabled = !canPlay;
+    loopBtn.disabled = !hasPlaylist;
+
+    shuffleBtn.classList.toggle('active', Player.shuffle === true);
+    const shuffleLabel = shuffleBtn.querySelector('span');
+    if (shuffleLabel) {
+        shuffleLabel.textContent = Player.shuffle ? 'Shuffle On' : 'Shuffle';
+    }
+
+    const loopEnabled = Player.repeat === 'all';
+    loopBtn.classList.toggle('active', loopEnabled);
+    const loopLabel = loopBtn.querySelector('span');
+    if (loopLabel) {
+        loopLabel.textContent = loopEnabled ? 'Loop: On' : 'Loop: Off';
+    }
+}
+
+function setShuffleMode(enabled) {
+    const shouldEnable = Boolean(enabled);
+    if (Boolean(Player.shuffle) !== shouldEnable && typeof Player.toggleShuffle === 'function') {
+        Player.toggleShuffle();
+    } else {
+        updatePlaylistPlaybackControls();
+    }
+}
+
+function playSelectedPlaylist(shuffleStart = false) {
+    const playlist = getSelectedPlaylist();
+    if (!playlist) {
+        UI.toast('Select a playlist first', 'error');
+        return;
+    }
+
+    const tracks = buildSelectedPlaylistPlaybackQueue();
+    if (!tracks.length) {
+        UI.toast('No playable songs in this playlist', 'error');
+        return;
+    }
+
+    setShuffleMode(shuffleStart);
+
+    let startIndex = 0;
+    if (shuffleStart && tracks.length > 1) {
+        startIndex = Math.floor(Math.random() * tracks.length);
+    }
+
+    if (!setPlaybackQueue('playlist', tracks, startIndex, playlist.id)) {
+        UI.toast('No playable songs in this playlist', 'error');
+        return;
+    }
+
+    playFromCurrentQueue(startIndex);
+}
+
+function playPlaylistSong(songId) {
+    const targetId = Number(songId);
+    if (!Number.isFinite(targetId) || targetId <= 0) {
+        UI.toast('Invalid song selected', 'error');
+        return;
+    }
+
+    const playlist = getSelectedPlaylist();
+    const tracks = buildSelectedPlaylistPlaybackQueue();
+    const startIndex = tracks.findIndex(track => Number(track.id) === targetId);
+    if (startIndex === -1) {
+        UI.toast('Song not found in playlist', 'error');
+        return;
+    }
+
+    setPlaybackQueue('playlist', tracks, startIndex, playlist?.id || null);
+    playFromCurrentQueue(startIndex);
+}
+
+function togglePlaylistLoop() {
+    const playlist = getSelectedPlaylist();
+    if (!playlist) {
+        UI.toast('Select a playlist first', 'error');
+        return;
+    }
+
+    Player.repeat = Player.repeat === 'all' ? 'off' : 'all';
+    Player.updateRepeatButton?.();
+    Player.updateNowPlayingButtons?.();
+    Player.saveSettings?.();
+    updatePlaylistPlaybackControls();
+    UI.toast(Player.repeat === 'all' ? 'Playlist loop enabled' : 'Playlist loop disabled', 'success');
+}
+
 // ==================== Library ====================
 async function loadHistory() {
     try {
         const data = await API.getHistory();
-        State.downloads = data || [];
+        State.downloads = Array.isArray(data) ? data : [];
+        const supportsLazyLoading = typeof window.IntersectionObserver === 'function';
+        State.library.visibleCount = Math.min(
+            supportsLazyLoading ? State.library.batchSize : State.downloads.length,
+            State.downloads.length
+        );
         updateLibrary();
     } catch (error) {
         console.error('Failed to load history:', error);
     }
 }
 
+function setupLibraryLazyLoading() {
+    const trigger = document.getElementById('libraryLoadTrigger');
+    const mainContent = document.getElementById('mainContent');
+
+    if (mainContent && !State.library.scrollListenerAttached) {
+        mainContent.addEventListener('scroll', maybeLoadMoreLibraryByScroll, { passive: true });
+        State.library.scrollListenerAttached = true;
+    }
+
+    if (!trigger || State.library.observer) return;
+
+    // Older browsers may not support IntersectionObserver.
+    if (typeof window.IntersectionObserver !== 'function') return;
+
+    State.library.observer = new IntersectionObserver((entries) => {
+        if (!isLibraryViewVisible()) return;
+
+        for (const entry of entries) {
+            if (entry.isIntersecting) {
+                loadMoreLibrarySongs();
+                break;
+            }
+        }
+    }, {
+        // The app scrolls inside #mainContent, not the window viewport.
+        root: mainContent || null,
+        rootMargin: '240px 0px',
+        threshold: 0
+    });
+
+    State.library.observer.observe(trigger);
+}
+
+function isLibraryViewVisible() {
+    const libraryView = document.getElementById('libraryView');
+    return !!libraryView && !libraryView.classList.contains('hidden');
+}
+
+function loadMoreLibrarySongs() {
+    if (State.library.visibleCount >= State.downloads.length) return;
+
+    State.library.visibleCount = Math.min(
+        State.library.visibleCount + State.library.batchSize,
+        State.downloads.length
+    );
+    updateLibrary();
+}
+
+function maybeLoadMoreLibraryByScroll() {
+    if (!isLibraryViewVisible()) return;
+    if (State.library.visibleCount >= State.downloads.length) return;
+
+    const mainContent = document.getElementById('mainContent');
+    if (!mainContent) return;
+
+    const remaining = mainContent.scrollHeight - (mainContent.scrollTop + mainContent.clientHeight);
+    if (remaining <= 240) {
+        loadMoreLibrarySongs();
+    }
+}
+
+function createLibraryCardMarkup(download) {
+    const filename = download.filename || '';
+    const title = download.title || 'Unknown Title';
+    const artist = download.artist || download.uploader || 'Unknown Artist';
+    const thumbnail = download.thumbnail || '';
+    const downloadId = Number(download.id);
+    const canManage = Number.isFinite(downloadId) && downloadId > 0;
+
+    if (!filename) return '';
+
+    const addButton = canManage ? `
+        <button class="library-card__add"
+                title="Add to playlist"
+                aria-label="Add to playlist"
+                onclick="openAddToPlaylistModal(event, ${downloadId})">
+            <i class="fas fa-plus"></i>
+        </button>
+    ` : '';
+
+    const deleteButton = canManage ? `
+        <button class="library-card__delete"
+                title="Delete song"
+                aria-label="Delete song"
+                onclick="deleteLibraryTrack(event, ${downloadId})">
+            <i class="fas fa-trash"></i>
+        </button>
+    ` : '';
+
+    return `
+        <div class="library-card library-item"
+             data-title="${UI.escapeHtml(title)}"
+             data-artist="${UI.escapeHtml(artist)}"
+             onclick="playTrack('${UI.escapeJs(filename)}', '${UI.escapeJs(title)}', '${UI.escapeJs(artist)}', '${UI.escapeJs(thumbnail)}')">
+            ${addButton}
+            ${deleteButton}
+            <img src="${thumbnail}" alt="" class="library-card__thumb" onerror="this.src='/static/images/default-album.png'">
+            <div class="library-card__info">
+                <div class="library-card__title">${UI.escapeHtml(title)}</div>
+                <div class="library-card__artist">${UI.escapeHtml(artist)}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function deleteLibraryTrack(event, downloadId) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    const id = Number(downloadId);
+    if (!Number.isFinite(id) || id <= 0) {
+        UI.toast('Invalid song id', 'error');
+        return;
+    }
+
+    const track = State.downloads.find(d => Number(d.id) === id);
+    const displayName = track?.title || 'this song';
+
+    if (!confirm(`Delete "${displayName}" from your library and remove the file?`)) {
+        return;
+    }
+
+    try {
+        await API.deleteHistoryItem(id);
+
+        // Stop playback if the deleted file is currently playing.
+        const currentTrack = Player.getCurrentTrack?.();
+        if (currentTrack?.filename && track?.filename && currentTrack.filename === track.filename) {
+            Player.stop?.();
+        }
+
+        State.downloads = State.downloads.filter(d => Number(d.id) !== id);
+        State.library.visibleCount = Math.min(State.library.visibleCount, State.downloads.length);
+
+        prunePlaybackQueueAfterDelete(id, track?.filename || '');
+
+        updateLibrary();
+        await loadPlaylists(true);
+        if (isViewActive('playlistsView') && State.playlists.selectedId) {
+            await loadSelectedPlaylistSongs();
+        }
+        updatePlaylistPlaybackControls();
+        UI.toast('Song deleted', 'success');
+    } catch (error) {
+        UI.toast(error.message || 'Failed to delete song', 'error');
+    }
+}
+
+function updateLibraryLazyStatus() {
+    const status = document.getElementById('libraryLoadStatus');
+    const trigger = document.getElementById('libraryLoadTrigger');
+    if (!status || !trigger) return;
+
+    if (State.downloads.length === 0) {
+        status.classList.add('hidden');
+        trigger.classList.add('hidden');
+        return;
+    }
+
+    const hasMore = State.library.visibleCount < State.downloads.length;
+    status.classList.remove('hidden');
+    status.textContent = hasMore
+        ? `Showing ${State.library.visibleCount} of ${State.downloads.length} songs. Scroll down to load more.`
+        : `Showing all ${State.downloads.length} songs.`;
+    trigger.classList.toggle('hidden', !hasMore);
+}
+
 function updateLibrary() {
     const grid = document.getElementById('libraryGrid');
     const count = document.getElementById('libraryCount');
+    if (!grid) return;
 
     if (count) count.textContent = `${State.downloads.length} song${State.downloads.length !== 1 ? 's' : ''}`;
 
@@ -635,71 +1363,170 @@ function updateLibrary() {
                 <p>Downloaded songs will appear here</p>
             </div>
         `;
+        updateLibraryLazyStatus();
         return;
     }
 
-    grid.innerHTML = State.downloads.slice(0, 20).map(d => {
-        // Safely get values with fallbacks
-        const filename = d.filename || '';
-        const title = d.title || 'Unknown Title';
-        const artist = d.artist || d.uploader || 'Unknown Artist';
-        const thumbnail = d.thumbnail || '';
-        
-        // Debug log
-        console.log('Library item:', { filename, title, artist });
-        
-        // Skip items without filename
-        if (!filename) {
-            console.warn('Skipping item without filename:', d);
-            return '';
-        }
-        
-        return `
-            <div class="library-card" onclick="playTrack('${UI.escapeJs(filename)}', '${UI.escapeJs(title)}', '${UI.escapeJs(artist)}', '${UI.escapeJs(thumbnail)}')">
-                <img src="${thumbnail}" alt="" class="library-card__thumb" onerror="this.src='/static/images/default-album.png'">
-                <div class="library-card__info">
-                    <div class="library-card__title">${UI.escapeHtml(title)}</div>
-                    <div class="library-card__artist">${UI.escapeHtml(artist)}</div>
-                </div>
-            </div>
-        `;
-    }).join('');
+    const visibleItems = State.downloads.slice(0, State.library.visibleCount);
+    grid.innerHTML = visibleItems.map(createLibraryCardMarkup).join('');
+    updateLibraryLazyStatus();
+
+    const currentSearch = document.getElementById('librarySearchInput')?.value?.trim();
+    if (currentSearch && typeof filterLibrary === 'function') {
+        filterLibrary(currentSearch);
+    }
+
+    // If the current viewport is already at the bottom area, pull the next batch.
+    requestAnimationFrame(maybeLoadMoreLibraryByScroll);
 }
 
-// Current playback index in library
+// Current playback index in active queue
 let currentPlayIndex = -1;
+
+function toPlaybackTrack(item) {
+    if (!item) return null;
+
+    const id = Number(item.id);
+    const filename = item.filename || '';
+    if (!filename) return null;
+
+    return {
+        id: Number.isFinite(id) ? id : null,
+        filename,
+        title: item.title || 'Unknown Title',
+        artist: item.artist || item.uploader || 'Unknown Artist',
+        thumbnail: item.thumbnail || ''
+    };
+}
+
+function buildLibraryPlaybackQueue() {
+    return State.downloads.map(toPlaybackTrack).filter(Boolean);
+}
+
+function buildSelectedPlaylistPlaybackQueue() {
+    return State.playlists.songs.map(toPlaybackTrack).filter(Boolean);
+}
+
+function setPlaybackQueue(source, tracks, startIndex = 0, playlistId = null) {
+    const queue = Array.isArray(tracks) ? tracks.filter(track => track && track.filename) : [];
+    if (!queue.length) {
+        State.playback.queue = [];
+        State.playback.source = 'library';
+        State.playback.playlistId = null;
+        currentPlayIndex = -1;
+        return false;
+    }
+
+    State.playback.queue = queue;
+    State.playback.source = source || 'library';
+
+    const numericPlaylistId = Number(playlistId);
+    State.playback.playlistId = Number.isFinite(numericPlaylistId) && numericPlaylistId > 0
+        ? numericPlaylistId
+        : null;
+
+    currentPlayIndex = Math.max(0, Math.min(startIndex, queue.length - 1));
+    return true;
+}
+
+function playFromCurrentQueue(index) {
+    if (!Array.isArray(State.playback.queue) || State.playback.queue.length === 0) return;
+
+    const safeIndex = Math.max(0, Math.min(index, State.playback.queue.length - 1));
+    const track = State.playback.queue[safeIndex];
+    if (!track || !track.filename) return;
+
+    currentPlayIndex = safeIndex;
+    Player.play(
+        track.filename,
+        track.title || 'Unknown',
+        track.artist || 'Unknown Artist',
+        track.thumbnail || ''
+    );
+
+    if (isViewActive('playlistsView')) {
+        renderSelectedPlaylistPanel();
+    }
+}
+
+function prunePlaybackQueueAfterDelete(downloadId, filename) {
+    if (!Array.isArray(State.playback.queue) || State.playback.queue.length === 0) return;
+
+    const currentTrack = State.playback.queue[currentPlayIndex] || null;
+    State.playback.queue = State.playback.queue.filter((track) => {
+        const isIdMatch = Number.isFinite(Number(track.id)) && Number(track.id) === Number(downloadId);
+        const isFileMatch = filename && track.filename === filename;
+        return !(isIdMatch || isFileMatch);
+    });
+
+    if (!State.playback.queue.length) {
+        currentPlayIndex = -1;
+        State.playback.source = 'library';
+        State.playback.playlistId = null;
+        return;
+    }
+
+    if (currentTrack?.filename) {
+        const sameTrackIndex = State.playback.queue.findIndex(
+            track => track.filename === currentTrack.filename
+        );
+        if (sameTrackIndex !== -1) {
+            currentPlayIndex = sameTrackIndex;
+            return;
+        }
+    }
+
+    currentPlayIndex = Math.min(currentPlayIndex, State.playback.queue.length - 1);
+}
+
+function getCurrentPlaybackSongId() {
+    if (currentPlayIndex < 0 || !Array.isArray(State.playback.queue)) return null;
+    const track = State.playback.queue[currentPlayIndex];
+    return Number.isFinite(Number(track?.id)) ? Number(track.id) : null;
+}
 
 function playTrack(filename, title, artist, thumbnail) {
     if (!filename) {
         UI.toast('Cannot play - no file found', 'error');
         return;
     }
-    
-    // Find index in downloads array
-    currentPlayIndex = State.downloads.findIndex(d => d.filename === filename);
-    
-    Player.play(filename, title, artist, thumbnail);
+
+    const libraryQueue = buildLibraryPlaybackQueue();
+    const matchedIndex = libraryQueue.findIndex(track => track.filename === filename);
+
+    if (matchedIndex !== -1 && setPlaybackQueue('library', libraryQueue, matchedIndex, null)) {
+        playFromCurrentQueue(matchedIndex);
+        return;
+    }
+
+    setPlaybackQueue('library', [{
+        id: null,
+        filename,
+        title: title || 'Unknown Title',
+        artist: artist || 'Unknown Artist',
+        thumbnail: thumbnail || ''
+    }], 0, null);
+    playFromCurrentQueue(0);
 }
 
 // Play next track (called by Player when song ends)
 function playNextTrack() {
-    if (State.downloads.length === 0) return;
-    
-    // Repeat One is handled in Player.onEnded, so if we get here it's not repeat-one
-    
+    const queue = State.playback.queue;
+    if (!Array.isArray(queue) || queue.length === 0) return;
+
     let nextIndex;
-    
+
     if (Player.shuffle) {
         // Random track (not the same as current)
         do {
-            nextIndex = Math.floor(Math.random() * State.downloads.length);
-        } while (nextIndex === currentPlayIndex && State.downloads.length > 1);
+            nextIndex = Math.floor(Math.random() * queue.length);
+        } while (nextIndex === currentPlayIndex && queue.length > 1);
     } else {
         // Next in order
         nextIndex = currentPlayIndex + 1;
-        
+
         // End of list
-        if (nextIndex >= State.downloads.length) {
+        if (nextIndex >= queue.length) {
             if (Player.repeat === 'all') {
                 nextIndex = 0; // Loop back to start
             } else {
@@ -709,16 +1536,50 @@ function playNextTrack() {
             }
         }
     }
-    
-    const track = State.downloads[nextIndex];
-    if (track && track.filename) {
-        currentPlayIndex = nextIndex;
-        Player.play(track.filename, track.title || 'Unknown', track.artist || track.uploader || 'Unknown', track.thumbnail || '');
+
+    playFromCurrentQueue(nextIndex);
+}
+
+function playPreviousTrack() {
+    const queue = State.playback.queue;
+    if (!Array.isArray(queue) || queue.length === 0) return;
+
+    const elapsed = Player.getCurrentTime?.() || 0;
+    if (elapsed > 3 && Player.audio) {
+        Player.audio.currentTime = 0;
+        return;
     }
+
+    let previousIndex;
+    if (Player.shuffle) {
+        do {
+            previousIndex = Math.floor(Math.random() * queue.length);
+        } while (previousIndex === currentPlayIndex && queue.length > 1);
+    } else {
+        previousIndex = currentPlayIndex - 1;
+        if (previousIndex < 0) {
+            if (Player.repeat === 'all') {
+                previousIndex = queue.length - 1;
+            } else {
+                if (Player.audio) Player.audio.currentTime = 0;
+                return;
+            }
+        }
+    }
+
+    playFromCurrentQueue(previousIndex);
+}
+
+function playTrackAtIndex(index) {
+    const safeIndex = Number(index);
+    if (!Number.isFinite(safeIndex)) return;
+    playFromCurrentQueue(safeIndex);
 }
 
 // Make it globally accessible for Player
 window.playNextTrack = playNextTrack;
+window.playPreviousTrack = playPreviousTrack;
+window.playTrackAtIndex = playTrackAtIndex;
 
 // ==================== Views ====================
 function showView(viewName) {
@@ -726,8 +1587,9 @@ function showView(viewName) {
     const viewNavMap = {
         'download': 'download',
         'library': 'library',
+        'playlists': 'playlists',
         'queue': 'queue',
-        'playlist-downloads': 'download'
+        'playlist-downloads': 'playlist-downloads'
     };
     const navName = viewNavMap[viewName] || viewName;
     
@@ -745,6 +1607,12 @@ function showView(viewName) {
     } else if (viewName === 'library') {
         document.getElementById('libraryView')?.classList.remove('hidden');
         updateLibrary();
+        requestAnimationFrame(maybeLoadMoreLibraryByScroll);
+    } else if (viewName === 'playlists') {
+        document.getElementById('playlistsView')?.classList.remove('hidden');
+        loadPlaylists(true).catch((error) => {
+            console.error('Failed to refresh playlists view:', error);
+        });
     } else if (viewName === 'queue') {
         document.getElementById('queueView')?.classList.remove('hidden');
         updateQueueView();
@@ -792,7 +1660,8 @@ async function saveSettings(e) {
         await API.saveSettings({
             default_format: document.getElementById('settingsFormat').value,
             default_quality: document.getElementById('settingsQuality').value,
-            check_duplicates: document.getElementById('settingsDuplicates').checked
+            check_duplicates: true,
+            skip_duplicates: true
         });
 
         closeSettings();
@@ -972,6 +1841,7 @@ function getStatusIcon(status) {
         'queued': '<i class="fas fa-clock"></i>',
         'downloading': '<i class="fas fa-spinner fa-spin"></i>',
         'completed': '<i class="fas fa-check-circle"></i>',
+        'skipped': '<i class="fas fa-forward"></i>',
         'failed': '<i class="fas fa-exclamation-circle"></i>'
     };
     return icons[status] || '';
@@ -979,6 +1849,7 @@ function getStatusIcon(status) {
 
 function getStatusText(status, error) {
     if (status === 'completed') return 'Completed';
+    if (status === 'skipped') return error ? `Skipped: ${error}` : 'Skipped (already in library)';
     if (status === 'queued') return 'Waiting...';
     if (status === 'failed') return `Failed: ${error || 'Unknown error'}`;
     return status;
