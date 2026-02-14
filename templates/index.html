@@ -65,10 +65,6 @@
             </nav>
             
             <div class="sidebar__footer">
-                <button class="sidebar__btn" onclick="openFolder()">
-                    <i class="fas fa-folder-open"></i>
-                    <span>Open Folder</span>
-                </button>
                 <button class="sidebar__btn" onclick="openSettings(); closeSidebar();">
                     <i class="fas fa-cog"></i>
                     <span>Settings</span>
@@ -277,8 +273,7 @@
                         <i class="fas fa-search"></i>
                         <input type="text" 
                                id="librarySearchInput" 
-                               placeholder="Search your library..."
-                               oninput="filterLibrary(this.value)">
+                               placeholder="Search your library...">
                     </div>
                 </div>
                 
@@ -286,11 +281,7 @@
                     <span id="libraryCount">0 songs</span>
                     <div class="library-controls__actions">
                         <button class="btn btn--icon" onclick="toggleLibraryView()" title="Toggle view">
-                            <i class="fas fa-th" id="libraryViewIcon"></i>
-                        </button>
-                        <button class="btn btn--secondary btn--small" onclick="openFolder()">
-                            <i class="fas fa-folder-open"></i>
-                            <span class="btn-text">Open Folder</span>
+                            <i class="fas fa-table-cells-large" id="libraryViewIcon"></i>
                         </button>
                     </div>
                 </div>
@@ -928,40 +919,6 @@
             if (event.target.id === 'settingsModal') {
                 closeSettings();
             }
-        }
-        
-        // Library view toggle
-        let libraryViewMode = 'grid';
-        function toggleLibraryView() {
-            const grid = document.getElementById('libraryGrid');
-            const icon = document.getElementById('libraryViewIcon');
-            
-            if (libraryViewMode === 'grid') {
-                libraryViewMode = 'list';
-                grid.classList.add('library-grid--list');
-                icon.className = 'fas fa-list';
-            } else {
-                libraryViewMode = 'grid';
-                grid.classList.remove('library-grid--list');
-                icon.className = 'fas fa-th';
-            }
-        }
-        
-        // Library search filter
-        function filterLibrary(query) {
-            const items = document.querySelectorAll('.library-item');
-            const lowerQuery = query.toLowerCase();
-            
-            items.forEach(item => {
-                const title = item.dataset.title?.toLowerCase() || '';
-                const artist = item.dataset.artist?.toLowerCase() || '';
-                
-                if (title.includes(lowerQuery) || artist.includes(lowerQuery)) {
-                    item.style.display = '';
-                } else {
-                    item.style.display = 'none';
-                }
-            });
         }
         
         // Offline detection UI

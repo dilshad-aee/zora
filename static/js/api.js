@@ -179,13 +179,6 @@ const API = {
 
         if (!response.ok) throw new Error('Failed to save settings');
         return response.json();
-    },
-
-    /**
-     * Open downloads folder
-     */
-    async openFolder() {
-        await fetch('/api/open-folder', { method: 'POST' });
     }
 };
 

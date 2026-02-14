@@ -531,27 +531,6 @@ def play_audio(filename):
     return send_from_directory(str(config.DOWNLOAD_DIR), resolved_filename, mimetype=mime_type)
 
 
-@bp.route('/api/open-folder', methods=['POST'])
-def open_folder():
-    """Open downloads folder in system file manager."""
-    import subprocess
-    
-    try:
-        folder_path = str(config.DOWNLOAD_DIR)
-        config.ensure_dirs()
-        
-        if os.name == 'nt':
-            os.startfile(folder_path)
-        elif os.uname().sysname == 'Darwin':
-            subprocess.run(['open', folder_path])
-        else:
-            subprocess.run(['xdg-open', folder_path])
-        
-        return jsonify({'success': True, 'path': folder_path})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @bp.route('/api/playlist-download/start', methods=['POST'])
 def start_playlist_download():
     """Start playlist download with session tracking."""

@@ -14,7 +14,6 @@ import os
 import re
 import json
 import uuid
-import subprocess
 import threading
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_from_directory
@@ -578,25 +577,6 @@ def list_files():
                     })
     files.sort(key=lambda x: x['modified'], reverse=True)
     return jsonify(files)
-
-
-@app.route('/api/open-folder', methods=['POST'])
-def open_folder():
-    """Open downloads folder in system file manager."""
-    try:
-        folder_path = os.path.abspath(DOWNLOAD_DIR)
-        os.makedirs(folder_path, exist_ok=True)
-        
-        if os.name == 'nt':
-            os.startfile(folder_path)
-        elif os.uname().sysname == 'Darwin':
-            subprocess.run(['open', folder_path])
-        else:
-            subprocess.run(['xdg-open', folder_path])
-        
-        return jsonify({'success': True, 'path': folder_path})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/downloads/<filename>')

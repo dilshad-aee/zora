@@ -35,7 +35,9 @@ const State = {
         batchSize: 24,
         visibleCount: 0,
         observer: null,
-        scrollListenerAttached: false
+        scrollListenerAttached: false,
+        viewMode: 'grid',
+        searchQuery: ''
     },
     playlist: {
         items: [],
@@ -76,6 +78,11 @@ async function init() {
         startPlaylistPolling();
     }
 
+    const savedLibraryViewMode = localStorage.getItem('library_view_mode');
+    if (savedLibraryViewMode === 'grid' || savedLibraryViewMode === 'list') {
+        State.library.viewMode = savedLibraryViewMode;
+    }
+
     // Load data
     await loadSettings();
     await loadHistory();
@@ -95,6 +102,13 @@ function setupEventListeners() {
     if (previewOption) {
         previewOption.addEventListener('change', (e) => {
             setPlaylistAutoCreateState(Boolean(e.target?.checked));
+        });
+    }
+
+    const librarySearchInput = document.getElementById('librarySearchInput');
+    if (librarySearchInput) {
+        librarySearchInput.addEventListener('input', (event) => {
+            filterLibrary(event.target?.value || '');
         });
     }
 
@@ -124,7 +138,14 @@ function setupEventListeners() {
             closeAddSongsToSelectedPlaylistModal();
         } else if (addToPlaylistModalOpen) {
             closeAddToPlaylistModal();
+        } else {
+            closeAllLibraryActionMenus();
         }
+    });
+
+    document.addEventListener('click', (event) => {
+        if (event.target?.closest('.library-card__menu-wrap')) return;
+        closeAllLibraryActionMenus();
     });
 }
 
@@ -1032,9 +1053,7 @@ async function deleteSelectedPlaylist() {
         title: 'Delete Playlist',
         message: `Delete playlist "${playlist.name}" and all of its mappings? Songs will stay in your library.`,
         confirmLabel: 'Delete Playlist',
-        danger: true,
-        requireText: playlist.name,
-        inputHint: `Type "${playlist.name}" to confirm.`
+        danger: true
     });
     if (!confirmed) return;
 
@@ -1578,7 +1597,58 @@ function isLibraryViewVisible() {
     return !!libraryView && !libraryView.classList.contains('hidden');
 }
 
+function hasLibrarySearchQuery() {
+    return normalizeSearchText(State.library.searchQuery).length > 0;
+}
+
+function getFilteredLibraryDownloads() {
+    const query = normalizeSearchText(State.library.searchQuery);
+    if (!query) return State.downloads;
+
+    return State.downloads.filter((download) => {
+        const title = download?.title || '';
+        const artist = download?.artist || download?.uploader || '';
+        const searchable = normalizeSearchText(`${title} ${artist}`);
+        return searchable.includes(query);
+    });
+}
+
+function applyLibraryViewMode() {
+    const grid = document.getElementById('libraryGrid');
+    const icon = document.getElementById('libraryViewIcon');
+    const isList = State.library.viewMode === 'list';
+    if (!grid) return;
+
+    grid.classList.toggle('library-grid--list', isList);
+    if (icon) {
+        icon.className = isList ? 'fas fa-list' : 'fas fa-table-cells-large';
+    }
+}
+
+function setLibraryViewMode(mode, options = {}) {
+    const persist = options.persist !== false;
+    State.library.viewMode = mode === 'list' ? 'list' : 'grid';
+    applyLibraryViewMode();
+
+    if (persist) {
+        localStorage.setItem('library_view_mode', State.library.viewMode);
+    }
+}
+
+function toggleLibraryView() {
+    const nextMode = State.library.viewMode === 'list' ? 'grid' : 'list';
+    closeAllLibraryActionMenus();
+    setLibraryViewMode(nextMode);
+}
+
+function filterLibrary(query) {
+    State.library.searchQuery = String(query || '');
+    closeAllLibraryActionMenus();
+    updateLibrary();
+}
+
 function loadMoreLibrarySongs() {
+    if (hasLibrarySearchQuery()) return;
     if (State.library.visibleCount >= State.downloads.length) return;
 
     State.library.visibleCount = Math.min(
@@ -1590,6 +1660,7 @@ function loadMoreLibrarySongs() {
 
 function maybeLoadMoreLibraryByScroll() {
     if (!isLibraryViewVisible()) return;
+    if (hasLibrarySearchQuery()) return;
     if (State.library.visibleCount >= State.downloads.length) return;
 
     const mainContent = document.getElementById('mainContent');
@@ -1599,6 +1670,44 @@ function maybeLoadMoreLibraryByScroll() {
     if (remaining <= 240) {
         loadMoreLibrarySongs();
     }
+}
+
+function closeAllLibraryActionMenus() {
+    const openMenus = document.querySelectorAll('.library-card__menu.is-open');
+    if (!openMenus.length) return;
+
+    openMenus.forEach((menu) => {
+        menu.classList.remove('is-open');
+        const toggleBtn = menu.parentElement?.querySelector('.library-card__menu-toggle');
+        if (toggleBtn) {
+            toggleBtn.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+
+function toggleLibraryCardMenu(event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    const toggleBtn = event?.currentTarget;
+    const menuWrap = toggleBtn?.closest('.library-card__menu-wrap');
+    const menu = menuWrap?.querySelector('.library-card__menu');
+    if (!toggleBtn || !menu) return;
+
+    const shouldOpen = !menu.classList.contains('is-open');
+    closeAllLibraryActionMenus();
+
+    if (shouldOpen) {
+        menu.classList.add('is-open');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+    } else {
+        toggleBtn.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function openAddToPlaylistFromLibraryMenu(event, downloadId) {
+    closeAllLibraryActionMenus();
+    openAddToPlaylistModal(event, downloadId);
 }
 
 function createLibraryCardMarkup(download) {
@@ -1611,22 +1720,31 @@ function createLibraryCardMarkup(download) {
 
     if (!filename) return '';
 
-    const addButton = canManage ? `
-        <button class="library-card__add"
-                title="Add to playlist"
-                aria-label="Add to playlist"
-                onclick="openAddToPlaylistModal(event, ${downloadId})">
-            <i class="fas fa-plus"></i>
-        </button>
-    ` : '';
-
-    const deleteButton = canManage ? `
-        <button class="library-card__delete"
-                title="Delete song"
-                aria-label="Delete song"
-                onclick="deleteLibraryTrack(event, ${downloadId})">
-            <i class="fas fa-trash"></i>
-        </button>
+    const actionsMenu = canManage ? `
+        <div class="library-card__menu-wrap">
+            <button class="library-card__menu-toggle"
+                    title="Song actions"
+                    aria-label="Song actions"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    onclick="toggleLibraryCardMenu(event)">
+                <i class="fas fa-ellipsis-vertical"></i>
+            </button>
+            <div class="library-card__menu" role="menu">
+                <button class="library-card__menu-item"
+                        role="menuitem"
+                        onclick="openAddToPlaylistFromLibraryMenu(event, ${downloadId})">
+                    <i class="fas fa-plus"></i>
+                    <span>Add to playlist</span>
+                </button>
+                <button class="library-card__menu-item library-card__menu-item--danger"
+                        role="menuitem"
+                        onclick="deleteLibraryTrack(event, ${downloadId})">
+                    <i class="fas fa-trash"></i>
+                    <span>Delete song</span>
+                </button>
+            </div>
+        </div>
     ` : '';
 
     return `
@@ -1634,12 +1752,11 @@ function createLibraryCardMarkup(download) {
              data-title="${UI.escapeHtml(title)}"
              data-artist="${UI.escapeHtml(artist)}"
              onclick="playTrack('${UI.escapeJs(filename)}', '${UI.escapeJs(title)}', '${UI.escapeJs(artist)}', '${UI.escapeJs(thumbnail)}')">
-            ${addButton}
-            ${deleteButton}
+            ${actionsMenu}
             <img src="${thumbnail}" alt="" class="library-card__thumb" onerror="this.src='/static/images/default-album.png'">
             <div class="library-card__info">
-                <div class="library-card__title">${UI.escapeHtml(title)}</div>
-                <div class="library-card__artist">${UI.escapeHtml(artist)}</div>
+                <div class="library-card__title" title="${UI.escapeHtml(title)}">${UI.escapeHtml(title)}</div>
+                <div class="library-card__artist" title="${UI.escapeHtml(artist)}">${UI.escapeHtml(artist)}</div>
             </div>
         </div>
     `;
@@ -1648,6 +1765,7 @@ function createLibraryCardMarkup(download) {
 async function deleteLibraryTrack(event, downloadId) {
     event?.preventDefault();
     event?.stopPropagation();
+    closeAllLibraryActionMenus();
 
     const id = Number(downloadId);
     if (!Number.isFinite(id) || id <= 0) {
@@ -1662,9 +1780,7 @@ async function deleteLibraryTrack(event, downloadId) {
         title: 'Delete Song From Library',
         message: `Delete "${displayName}" from your library and remove the audio file from storage? This action cannot be undone.`,
         confirmLabel: 'Delete Song',
-        danger: true,
-        requireText: 'DELETE',
-        inputHint: 'Type "DELETE" to confirm permanent deletion.'
+        danger: true
     });
     if (!confirmed) return;
 
@@ -1694,7 +1810,7 @@ async function deleteLibraryTrack(event, downloadId) {
     }
 }
 
-function updateLibraryLazyStatus() {
+function updateLibraryLazyStatus(filteredCount = State.downloads.length, searchActive = false) {
     const status = document.getElementById('libraryLoadStatus');
     const trigger = document.getElementById('libraryLoadTrigger');
     if (!status || !trigger) return;
@@ -1705,11 +1821,18 @@ function updateLibraryLazyStatus() {
         return;
     }
 
-    const hasMore = State.library.visibleCount < State.downloads.length;
+    if (searchActive) {
+        status.classList.remove('hidden');
+        status.textContent = `${filteredCount} result${filteredCount !== 1 ? 's' : ''} in your library`;
+        trigger.classList.add('hidden');
+        return;
+    }
+
+    const hasMore = State.library.visibleCount < filteredCount;
     status.classList.remove('hidden');
     status.textContent = hasMore
-        ? `Showing ${State.library.visibleCount} of ${State.downloads.length} songs. Scroll down to load more.`
-        : `Showing all ${State.downloads.length} songs.`;
+        ? `Showing ${State.library.visibleCount} of ${filteredCount} songs. Scroll down to load more.`
+        : `Showing all ${filteredCount} songs.`;
     trigger.classList.toggle('hidden', !hasMore);
 }
 
@@ -1718,9 +1841,22 @@ function updateLibrary() {
     const count = document.getElementById('libraryCount');
     if (!grid) return;
 
-    if (count) count.textContent = `${State.downloads.length} song${State.downloads.length !== 1 ? 's' : ''}`;
+    const filteredDownloads = getFilteredLibraryDownloads();
+    const searchActive = hasLibrarySearchQuery();
+    const totalCount = State.downloads.length;
+    const filteredCount = filteredDownloads.length;
 
-    if (State.downloads.length === 0) {
+    if (count) {
+        if (searchActive) {
+            count.textContent = `${filteredCount} result${filteredCount !== 1 ? 's' : ''} / ${totalCount} song${totalCount !== 1 ? 's' : ''}`;
+        } else {
+            count.textContent = `${totalCount} song${totalCount !== 1 ? 's' : ''}`;
+        }
+    }
+
+    applyLibraryViewMode();
+
+    if (totalCount === 0) {
         grid.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-music"></i>
@@ -1728,21 +1864,32 @@ function updateLibrary() {
                 <p>Downloaded songs will appear here</p>
             </div>
         `;
-        updateLibraryLazyStatus();
+        updateLibraryLazyStatus(0, searchActive);
         return;
     }
 
-    const visibleItems = State.downloads.slice(0, State.library.visibleCount);
-    grid.innerHTML = visibleItems.map(createLibraryCardMarkup).join('');
-    updateLibraryLazyStatus();
-
-    const currentSearch = document.getElementById('librarySearchInput')?.value?.trim();
-    if (currentSearch && typeof filterLibrary === 'function') {
-        filterLibrary(currentSearch);
+    if (searchActive && filteredCount === 0) {
+        grid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <h3>No matches found</h3>
+                <p>Try a different song title or artist name.</p>
+            </div>
+        `;
+        updateLibraryLazyStatus(0, true);
+        return;
     }
 
+    const visibleItems = searchActive
+        ? filteredDownloads
+        : filteredDownloads.slice(0, State.library.visibleCount);
+    grid.innerHTML = visibleItems.map(createLibraryCardMarkup).join('');
+    updateLibraryLazyStatus(filteredCount, searchActive);
+
     // If the current viewport is already at the bottom area, pull the next batch.
-    requestAnimationFrame(maybeLoadMoreLibraryByScroll);
+    if (!searchActive) {
+        requestAnimationFrame(maybeLoadMoreLibraryByScroll);
+    }
 }
 
 // Current playback index in active queue
@@ -2086,16 +2233,6 @@ function openSettings() {
 
 function closeSettings() {
     document.getElementById('settingsModal')?.classList.add('hidden');
-}
-
-// ==================== Folder ====================
-async function openFolder() {
-    try {
-        await API.openFolder();
-        UI.toast('Opening downloads folder...', 'success');
-    } catch (error) {
-        UI.toast('Failed to open folder', 'error');
-    }
 }
 
 // ==================== Player Wrappers ====================
