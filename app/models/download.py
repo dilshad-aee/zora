@@ -128,6 +128,35 @@ class Download(db.Model):
         return cls._normalize_text(artist)
 
     @classmethod
+    def _normalize_filename_stem(cls, filename):
+        stem = os.path.splitext(os.path.basename(filename or ''))[0]
+        stem = re.sub(r'\s*\[[A-Za-z0-9_-]{11}\]\s*$', '', stem).strip()
+        return cls._normalize_title(stem)
+
+    @classmethod
+    def _is_missing_artist(cls, artist_norm):
+        artist_value = (artist_norm or '').strip()
+        return artist_value in {
+            '',
+            'unknown',
+            'unknown artist',
+            'unknown channel',
+            'various artists',
+            'various artist',
+            'various',
+            'na',
+            'n a',
+        }
+
+    @classmethod
+    def _is_specific_title(cls, title_norm):
+        text = (title_norm or '').strip()
+        if not text:
+            return False
+        tokens = [tok for tok in text.split(' ') if tok]
+        return len(text) >= 16 and len(tokens) >= 3
+
+    @classmethod
     def _duration_value(cls, duration):
         try:
             value = int(duration)
@@ -176,6 +205,7 @@ class Download(db.Model):
                 'title_norm': title_norm,
                 'artist_norm': artist_norm,
                 'filename': row.filename,
+                'filename_stem_norm': cls._normalize_filename_stem(row.filename),
                 'duration': duration_val,
             }
 
@@ -208,9 +238,30 @@ class Download(db.Model):
     def _delete_stale_records(cls, stale_ids):
         if not stale_ids:
             return
-        cls.query.filter(cls.id.in_(list(stale_ids))).delete(synchronize_session=False)
-        db.session.commit()
+        from config import config
+
+        stale_rows = cls.query.filter(cls.id.in_(list(stale_ids))).all()
+        deleted = False
+
+        for row in stale_rows:
+            filename = os.path.basename((row.filename or '').strip())
+            if not filename:
+                db.session.delete(row)
+                deleted = True
+                continue
+
+            filepath = config.DOWNLOAD_DIR / filename
+            if not filepath.exists():
+                db.session.delete(row)
+                deleted = True
+
+        if deleted:
+            db.session.commit()
+
+        # Cache may be stale (e.g. filename repaired in DB with same row count),
+        # so always invalidate before returning.
         cls.invalidate_duplicate_cache()
+        return deleted
 
     @classmethod
     def _is_same_track(cls, entry, title_norm, artist_norm, duration, video_id):
@@ -218,12 +269,14 @@ class Download(db.Model):
         if video_id and entry_video_id and video_id == entry_video_id:
             return True
 
-        if not title_norm or title_norm != entry.get('title_norm'):
+        entry_title = entry.get('title_norm') or ''
+        entry_filename_title = entry.get('filename_stem_norm') or ''
+        if not title_norm or (title_norm != entry_title and title_norm != entry_filename_title):
             return False
 
         entry_artist = entry.get('artist_norm') or ''
         artist_exact = bool(artist_norm and entry_artist and artist_norm == entry_artist)
-        artist_missing = not artist_norm or not entry_artist
+        artist_missing = cls._is_missing_artist(artist_norm) or cls._is_missing_artist(entry_artist)
         duration_exact = cls._duration_match(duration, entry.get('duration'))
         duration_unknown = cls._duration_value(duration) <= 0 or cls._duration_value(entry.get('duration')) <= 0
 
@@ -231,6 +284,8 @@ class Download(db.Model):
         if artist_exact and (duration_exact or duration_unknown):
             return True
         if artist_missing and duration_exact:
+            return True
+        if artist_missing and duration_unknown and cls._is_specific_title(title_norm):
             return True
         return False
     
@@ -327,7 +382,7 @@ class Download(db.Model):
         return cls.query.order_by(cls.downloaded_at.desc()).limit(limit).all()
     
     @classmethod
-    def check_duplicate(cls, title, video_id=None, artist=None, duration=None):
+    def check_duplicate(cls, title, video_id=None, artist=None, duration=None, _retry=False):
         """
         Fast multi-parameter duplicate check.
 
@@ -379,6 +434,15 @@ class Download(db.Model):
 
         if stale_ids:
             cls._delete_stale_records(stale_ids)
+            if not _retry:
+                # Retry once against fresh cache in case stale filenames were repaired.
+                return cls.check_duplicate(
+                    title=title,
+                    video_id=video_id,
+                    artist=artist,
+                    duration=duration,
+                    _retry=True,
+                )
 
         return False, None
     

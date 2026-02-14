@@ -60,55 +60,11 @@ const API = {
      */
     async getStatus(jobId) {
         const response = await fetch(`/api/status/${jobId}`);
-        return response.json();
-    },
-
-    /**
-     * Add to queue
-     */
-    async addToQueue(url, title, thumbnail, format, quality, metadata = {}) {
-        const payload = {
-            url,
-            title,
-            thumbnail,
-            format,
-            quality,
-            video_id: metadata.video_id || '',
-            artist: metadata.artist || '',
-            duration: metadata.duration || 0
-        };
-
-        const response = await fetch('/api/queue/add', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Failed to add to queue');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || `Status request failed (${response.status})`);
+        }
         return data;
-    },
-
-    /**
-     * Get queue
-     */
-    async getQueue() {
-        const response = await fetch('/api/queue');
-        return response.json();
-    },
-
-    /**
-     * Remove from queue
-     */
-    async removeFromQueue(itemId) {
-        await fetch(`/api/queue/remove/${itemId}`, { method: 'POST' });
-    },
-
-    /**
-     * Clear queue
-     */
-    async clearQueue() {
-        await fetch('/api/queue/clear', { method: 'POST' });
     },
 
     /**

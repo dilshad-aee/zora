@@ -29,25 +29,35 @@ class PlaylistDownloadService:
         Returns:
             Created session dictionary
         """
+        prepared_songs = []
+        for idx, song in enumerate(songs):
+            source_key = str(
+                song.get('entry_key')
+                or song.get('session_song_id')
+                or song.get('id')
+                or f'song-{idx}'
+            ).strip()
+            session_song_id = f"{source_key}::{idx}"
+            prepared_songs.append({
+                'id': song.get('id', ''),
+                'session_song_id': session_song_id,
+                'title': song.get('title', 'Unknown'),
+                'url': song.get('url', ''),
+                'thumbnail': song.get('thumbnail', ''),
+                'uploader': song.get('uploader', 'Unknown'),
+                'duration': song.get('duration', 0),
+                'duration_str': song.get('duration_str', '0:00'),
+                'status': 'queued',  # queued, downloading, completed, failed
+                'progress': 0,
+                'speed': 0,
+                'eta': 0,
+                'error': None,
+                'job_id': None
+            })
+
         session = {
             'session_id': session_id,
-            'songs': [
-                {
-                    'id': song['id'],
-                    'title': song['title'],
-                    'url': song['url'],
-                    'thumbnail': song.get('thumbnail', ''),
-                    'uploader': song.get('uploader', 'Unknown'),
-                    'duration_str': song.get('duration_str', '0:00'),
-                    'status': 'queued',  # queued, downloading, completed, failed
-                    'progress': 0,
-                    'speed': 0,
-                    'eta': 0,
-                    'error': None,
-                    'job_id': None
-                }
-                for song in songs
-            ],
+            'songs': prepared_songs,
             'total': len(songs),
             'completed': 0,
             'failed': 0,
@@ -72,8 +82,11 @@ class PlaylistDownloadService:
         if not session:
             return
         
+        target = str(song_id)
         for song in session['songs']:
-            if song['id'] == song_id:
+            session_song_id = str(song.get('session_song_id', ''))
+            legacy_song_id = str(song.get('id', ''))
+            if session_song_id == target or legacy_song_id == target:
                 song['status'] = status
                 
                 # Update additional fields

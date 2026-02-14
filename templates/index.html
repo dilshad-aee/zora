@@ -55,18 +55,12 @@
                     <span>My Music</span>
                 </a>
                 <a class="nav-link" data-view="playlists" onclick="showView('playlists'); closeSidebar();">
-                    <i class="fas fa-list-music"></i>
+                    <i class="fas fa-list-ul"></i>
                     <span>Playlists</span>
-                </a>
-                <a class="nav-link" data-view="queue" onclick="showView('queue'); closeSidebar();">
-                    <i class="fas fa-list"></i>
-                    <span>Queue</span>
-                    <span class="nav-badge" id="queueBadge" style="display: none;">0</span>
                 </a>
                 <a class="nav-link" data-view="playlist-downloads" onclick="showView('playlist-downloads'); closeSidebar();">
                     <i class="fas fa-download"></i>
                     <span>Playlist Downloads</span>
-                    <span class="nav-badge" id="playlistDownloadBadge" style="display: none;">0</span>
                 </a>
             </nav>
             
@@ -123,6 +117,7 @@
                                    enterkeyhint="go">
                             <button class="search-btn" id="mainBtn" onclick="handleMainAction()">
                                 <i class="fas fa-arrow-right"></i>
+                                <span class="search-btn__text">Analyze</span>
                             </button>
                         </div>
                         
@@ -145,8 +140,11 @@
                 <!-- Ready to Download Card -->
                 <div class="download-ready hidden" id="downloadReady">
                     <div class="download-card">
-                        <img id="previewThumb" src="" alt="" class="download-card__image">
+                        <img id="previewThumb" src="{{ url_for('static', filename='images/default-album.png') }}" alt="" class="download-card__image" onerror="this.onerror=null;this.src='/static/images/default-album.png';">
                         <div class="download-card__info">
+                            <div class="download-card__eyebrow">
+                                <span class="download-card__badge" id="previewTypeBadge">Single Track</span>
+                            </div>
                             <h3 id="previewTitle" class="download-card__title">Song Title</h3>
                             <p id="previewArtist" class="download-card__artist">Artist Name</p>
                             <div class="download-card__meta">
@@ -162,24 +160,24 @@
                         </div>
                         
                         <div class="download-card__actions">
-                            <div class="format-picker">
-                                <label>Format:</label>
-                                <select id="formatSelect" class="format-select">
-                                    <option value="m4a" selected>M4A (iPhone)</option>
-                                    <option value="mp3">MP3 (Universal)</option>
-                                    <option value="flac">FLAC (Lossless)</option>
-                                </select>
+                            <div class="download-card__panel">
+                                <div class="format-picker">
+                                    <label>Format</label>
+                                    <select id="formatSelect" class="format-select">
+                                        <option value="m4a" selected>M4A (iPhone)</option>
+                                        <option value="mp3">MP3 (Universal)</option>
+                                        <option value="flac">FLAC (Lossless)</option>
+                                    </select>
+                                </div>
+                                <p class="download-card__format-note">Recommended for mobile: M4A or MP3.</p>
                             </div>
-                            
-                            <button class="btn btn--primary btn--large" id="downloadNowBtn" onclick="startDownload()">
-                                <i class="fas fa-download"></i>
-                                <span>Download Now</span>
-                            </button>
-                            
-                            <button class="btn btn--secondary" onclick="addToQueue()">
-                                <i class="fas fa-plus"></i>
-                                <span>Add to Queue</span>
-                            </button>
+
+                            <div class="download-card__button-group">
+                                <button class="btn btn--primary download-card__download-btn" id="downloadNowBtn" onclick="startDownload()">
+                                    <i class="fas fa-download"></i>
+                                    <span>Download Now</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -192,6 +190,16 @@
                         <span id="playlistCount" class="text-muted">(0 songs)</span>
                     </h2>
                     
+                    <div class="playlist-create-row">
+                        <label class="playlist-create-option" for="autoCreatePlaylistCheckbox">
+                            <input type="checkbox" id="autoCreatePlaylistCheckbox">
+                            <span class="playlist-create-option__text">
+                                <span class="playlist-create-option__title">Add this as a playlist</span>
+                                <span class="playlist-create-option__desc">Create a new playlist and auto-add downloaded or skipped duplicate songs.</span>
+                            </span>
+                        </label>
+                    </div>
+
                     <div class="playlist-controls">
                         <button class="btn btn--secondary btn--small" onclick="selectAllSongs()">
                             <i class="fas fa-check-square"></i>
@@ -218,14 +226,17 @@
                         <i class="fas fa-spinner fa-spin"></i> Downloading...
                     </h2>
                     <div class="progress-card">
-                        <img id="progressThumb" src="" alt="" class="progress-card__thumb">
+                        <img id="progressThumb" src="{{ url_for('static', filename='images/default-album.png') }}" alt="" class="progress-card__thumb" onerror="this.onerror=null;this.src='/static/images/default-album.png';">
                         <div class="progress-card__info">
+                            <div class="progress-card__status-row">
+                                <span class="progress-card__badge">In Progress</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
                             <h4 id="progressTitle">Downloading...</h4>
                             <div class="progress-bar">
                                 <div class="progress-bar__fill" id="progressFill"></div>
                             </div>
                             <div class="progress-stats">
-                                <span id="progressPercent">0%</span>
                                 <span id="progressSpeed">-- MB/s</span>
                                 <span id="progressEta">--:--</span>
                             </div>
@@ -258,6 +269,7 @@
                 <h1 class="page-title">
                     <i class="fas fa-music"></i> My Music Library
                 </h1>
+                <p class="page-subtitle">Browse your downloads, play instantly, and manage tracks safely.</p>
                 
                 <!-- Library Search/Filter (Mobile) -->
                 <div class="library-search">
@@ -299,9 +311,45 @@
                 <h1 class="page-title">
                     <i class="fas fa-list-music"></i> My Playlists
                 </h1>
+                <p class="page-subtitle">Create curated collections, then play, shuffle, or loop with full control.</p>
+
+                <div class="playlist-workspace-switch" role="tablist" aria-label="Playlist workspace">
+                    <button type="button"
+                            class="playlist-workspace-switch__btn active"
+                            id="playlistWorkspaceLibraryBtn"
+                            onclick="switchPlaylistWorkspace('library')">
+                        <i class="fas fa-layer-group"></i>
+                        <span>Browse Playlists</span>
+                    </button>
+                    <button type="button"
+                            class="playlist-workspace-switch__btn"
+                            id="playlistWorkspaceViewerBtn"
+                            onclick="switchPlaylistWorkspace('viewer')">
+                        <i class="fas fa-list-check"></i>
+                        <span>Playlist Details</span>
+                    </button>
+                </div>
 
                 <div class="playlists-layout">
-                    <div class="playlists-panel">
+                    <div class="playlists-panel playlists-panel--library" id="playlistsBrowsePanel">
+                        <div class="playlists-panel__section-title">
+                            <i class="fas fa-layer-group"></i>
+                            <span>Playlist Library</span>
+                        </div>
+                        <p class="text-muted playlists-panel__section-subtitle">
+                            Select a playlist to open and manage songs.
+                        </p>
+
+                        <div class="playlist-library-search">
+                            <i class="fas fa-search"></i>
+                            <input type="text"
+                                   id="playlistListSearch"
+                                   class="form-input form-input--square"
+                                   placeholder="Search playlists..."
+                                   autocomplete="off"
+                                   oninput="filterPlaylistsList(this.value)">
+                        </div>
+
                         <div class="playlists-create">
                             <input type="text"
                                    id="newPlaylistName"
@@ -324,16 +372,40 @@
                         </div>
                     </div>
 
-                    <div class="playlists-panel playlists-panel--songs">
+                    <div class="playlists-panel playlists-panel--songs playlists-panel--hidden" id="playlistsSongsPanel">
+                        <div class="playlists-panel__section-title">
+                            <i class="fas fa-compact-disc"></i>
+                            <span>Playlist Studio</span>
+                        </div>
+                        <p class="text-muted playlists-panel__section-subtitle">
+                            Play, reorder your focus, and curate songs in one workspace.
+                        </p>
+
                         <div class="playlists-panel__header">
                             <h2 id="selectedPlaylistName">Select a playlist</h2>
-                            <button class="btn btn--danger btn--small"
-                                    id="deletePlaylistBtn"
-                                    style="display: none;"
-                                    onclick="deleteSelectedPlaylist()">
-                                <i class="fas fa-trash"></i>
-                                <span class="btn-text">Delete</span>
-                            </button>
+                            <div class="playlists-panel__header-actions">
+                                <button class="btn btn--secondary btn--small"
+                                        id="playlistBackToBrowseBtn"
+                                        style="display: none;"
+                                        onclick="switchPlaylistWorkspace('library')">
+                                    <i class="fas fa-arrow-left"></i>
+                                    <span class="btn-text">Browse</span>
+                                </button>
+                                <button class="btn btn--secondary btn--small"
+                                        id="addSongsToPlaylistBtn"
+                                        style="display: none;"
+                                        onclick="openAddSongsToSelectedPlaylistModal()">
+                                    <i class="fas fa-plus"></i>
+                                    <span class="btn-text">Add To This Playlist</span>
+                                </button>
+                                <button class="btn btn--danger btn--small"
+                                        id="deletePlaylistBtn"
+                                        style="display: none;"
+                                        onclick="deleteSelectedPlaylist()">
+                                    <i class="fas fa-trash"></i>
+                                    <span class="btn-text">Delete</span>
+                                </button>
+                            </div>
                         </div>
                         <p class="text-muted" id="selectedPlaylistMeta">Choose a playlist to see songs</p>
                         <div class="playlist-playback-controls">
@@ -371,34 +443,12 @@
                 </div>
             </div>
             
-            <!-- QUEUE VIEW -->
-            <div class="view hidden" id="queueView">
-                <h1 class="page-title">
-                    <i class="fas fa-list"></i> Download Queue
-                </h1>
-                
-                <div class="queue-controls">
-                    <span id="queueCount">0 items in queue</span>
-                    <button class="btn btn--danger btn--small" onclick="clearQueue()" id="clearQueueBtn" style="display: none;">
-                        <i class="fas fa-trash"></i>
-                        <span class="btn-text">Clear All</span>
-                    </button>
-                </div>
-                
-                <div class="queue-list" id="queueList">
-                    <div class="empty-state">
-                        <i class="fas fa-list"></i>
-                        <h3>Queue is empty</h3>
-                        <p>Add songs to download them one by one</p>
-                    </div>
-                </div>
-            </div>
-            
             <!-- PLAYLIST DOWNLOADS VIEW -->
             <div class="view hidden" id="playlistDownloadsView">
                 <h1 class="page-title">
                     <i class="fas fa-download"></i> Playlist Downloads
                 </h1>
+                <p class="page-subtitle">Track progress across each song with clear real-time status.</p>
                 
                 <div id="noActiveDownload" class="empty-state">
                     <i class="fas fa-music"></i>
@@ -520,10 +570,9 @@
                 <i class="fas fa-music"></i>
                 <span>Library</span>
             </a>
-            <a class="mobile-nav__item" onclick="showView('queue')">
-                <i class="fas fa-list"></i>
-                <span>Queue</span>
-                <span class="mobile-nav__badge" id="mobileQueueBadge" style="display: none;">0</span>
+            <a class="mobile-nav__item" onclick="showView('playlist-downloads')">
+                <i class="fas fa-list-check"></i>
+                <span>Progress</span>
             </a>
         </nav>
     </div>
@@ -676,6 +725,72 @@
             <div id="addToPlaylistOptions" class="add-to-playlist-options"></div>
         </div>
     </div>
+
+    <!-- Add Songs To Selected Playlist Modal -->
+    <div class="modal-overlay hidden" id="addSongsToPlaylistModal" onclick="closeAddSongsToPlaylistModalOnOverlay(event)">
+        <div class="modal playlist-add-modal" onclick="event.stopPropagation()">
+            <div class="playlist-add-modal__header">
+                <div class="playlist-add-modal__heading">
+                    <p class="playlist-add-modal__eyebrow">Add To Playlist</p>
+                    <h2 id="addSongsToPlaylistTitle">Playlist</h2>
+                </div>
+                <button class="modal__close" onclick="closeAddSongsToSelectedPlaylistModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="playlist-add-modal__search">
+                <i class="fas fa-search"></i>
+                <input type="text"
+                       id="addSongsSearchInput"
+                       class="form-input form-input--square"
+                       placeholder="Search songs in your library..."
+                       autocomplete="off"
+                       oninput="onAddSongsSearchInput(this.value)">
+            </div>
+
+            <p class="text-muted playlist-add-modal__hint" id="addSongsModalHint">
+                Search your library and add songs instantly.
+            </p>
+
+            <div id="addSongsToPlaylistList" class="playlist-add-modal__list"></div>
+        </div>
+    </div>
+
+    <!-- Confirm Action Modal -->
+    <div class="modal-overlay hidden" id="confirmActionModal" onclick="closeConfirmActionOnOverlay(event)">
+        <div class="modal modal--compact confirm-modal" onclick="event.stopPropagation()">
+            <div class="modal__header">
+                <h2 id="confirmActionTitle"><i class="fas fa-shield-alt"></i> Confirm Action</h2>
+                <button class="modal__close" onclick="cancelConfirmAction()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <p class="confirm-modal__message" id="confirmActionMessage">Are you sure you want to continue?</p>
+
+            <div class="form-group hidden" id="confirmActionInputGroup">
+                <label id="confirmActionInputLabel" for="confirmActionInput">Type confirmation text</label>
+                <input type="text"
+                       id="confirmActionInput"
+                       class="form-input form-input--square"
+                       autocomplete="off"
+                       autocorrect="off"
+                       autocapitalize="off"
+                       spellcheck="false">
+                <p class="text-muted confirm-modal__hint" id="confirmActionInputHint"></p>
+            </div>
+
+            <div class="confirm-modal__actions">
+                <button class="btn btn--secondary" onclick="cancelConfirmAction()">
+                    Cancel
+                </button>
+                <button class="btn btn--danger" id="confirmActionSubmitBtn" onclick="submitConfirmAction()">
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
     
     <!-- Loading Overlay -->
     <div class="loader-overlay hidden" id="loaderOverlay">
@@ -780,7 +895,6 @@
                 'download': 0,
                 'library': 1,
                 'playlists': 1,
-                'queue': 2,
                 'playlist-downloads': 2
             };
             
@@ -888,7 +1002,7 @@
         }
         updateSafeAreas();
         
-        // Sync queue badge with mobile nav
+        // Keep mobile nav in sync with current view
         const originalShowView = window.showView;
         window.showView = function(viewName) {
             if (originalShowView) originalShowView(viewName);

@@ -6,12 +6,86 @@ import os
 import re
 import shutil
 import subprocess
+from datetime import datetime
 
 from flask import Blueprint, jsonify
 from app.models import Download, PlaylistSong, db
 from config import config
 
 bp = Blueprint('history', __name__)
+
+AUDIO_EXTENSIONS = {'.m4a', '.mp3', '.aac', '.ogg', '.opus', '.flac', '.wav', '.webm', '.mka'}
+
+
+def _extract_video_id_from_filename(filename: str) -> str:
+    """Extract youtube id from filename pattern: title [VIDEO_ID].ext"""
+    stem = os.path.splitext(os.path.basename(filename or ''))[0]
+    match = re.search(r'\[([A-Za-z0-9_-]{11})\]', stem)
+    return match.group(1) if match else ''
+
+
+def _derive_title_artist_from_filename(filename: str):
+    """Best-effort title/artist extraction from filename."""
+    stem = os.path.splitext(os.path.basename(filename or ''))[0]
+    cleaned = re.sub(r'\s*\[[A-Za-z0-9_-]{11}\]\s*$', '', stem).strip()
+
+    if ' - ' in cleaned:
+        artist, title = cleaned.split(' - ', 1)
+        return (title.strip() or cleaned, artist.strip() or 'Unknown Artist')
+
+    return (cleaned or stem or 'Unknown', 'Unknown Artist')
+
+
+def _thumbnail_for_video_id(video_id: str) -> str:
+    """Resolve local thumbnail first, fallback to YouTube thumbnail URL."""
+    if not video_id:
+        return ''
+
+    for ext in ('.webp', '.jpg', '.png', '.jpeg'):
+        local_path = config.THUMBNAILS_DIR / f"{video_id}{ext}"
+        if local_path.exists() and local_path.is_file():
+            return f"/api/thumbnails/{video_id}{ext}"
+
+    return f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg"
+
+
+def _sync_missing_download_rows(downloads: list) -> bool:
+    """Ensure each audio file on disk exists in downloads table."""
+    existing_filenames = {str(d.filename or '') for d in downloads}
+    added = False
+
+    if not config.DOWNLOAD_DIR.exists():
+        return False
+
+    for path in config.DOWNLOAD_DIR.iterdir():
+        if not path.is_file():
+            continue
+        if path.name.startswith('.'):
+            continue
+        if path.suffix.lower() not in AUDIO_EXTENSIONS:
+            continue
+        if path.name in existing_filenames:
+            continue
+
+        title, artist = _derive_title_artist_from_filename(path.name)
+        video_id = _extract_video_id_from_filename(path.name)
+        thumbnail = _thumbnail_for_video_id(video_id)
+
+        db.session.add(Download(
+            video_id=video_id or '',
+            title=title,
+            artist=artist,
+            filename=path.name,
+            format=path.suffix.lower().lstrip('.') or 'm4a',
+            quality='320kbps',
+            thumbnail=thumbnail,
+            duration=0,
+            file_size=path.stat().st_size if path.exists() else 0,
+            downloaded_at=datetime.fromtimestamp(path.stat().st_mtime) if path.exists() else datetime.utcnow(),
+        ))
+        added = True
+
+    return added
 
 
 def _find_existing_audio_variant(filename: str):
@@ -110,6 +184,13 @@ def get_history():
         downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
         changed = False
 
+        # Recover from accidental/empty DB state by rebuilding missing rows from audio files.
+        if _sync_missing_download_rows(downloads):
+            changed = True
+            db.session.commit()
+            Download.invalidate_duplicate_cache()
+            downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
+
         for download in downloads:
             if not download.filename:
                 continue
@@ -132,6 +213,7 @@ def get_history():
 
         if changed:
             db.session.commit()
+            Download.invalidate_duplicate_cache()
             downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
 
         result = []

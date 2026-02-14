@@ -2,9 +2,10 @@
 Queue Service - Background download queue processing.
 """
 
+import os
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import config
 
 
@@ -25,7 +26,54 @@ class QueueService:
         self.queue = []
         self.active_downloads = {}
         self.queue_lock = threading.Lock()
+        self.active_lock = threading.Lock()
         self.is_processing = False
+        self.completed_retention_seconds = 120
+    
+    def _now_str(self) -> str:
+        """Return a consistent timestamp string."""
+        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    def _parse_dt(self, value: str):
+        """Parse timestamp strings used by queue records."""
+        try:
+            return datetime.strptime(str(value), '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return None
+
+    def _set_active_download(self, job_id: str, payload: dict):
+        """Create/replace active download entry with updated timestamp."""
+        entry = dict(payload or {})
+        entry['updated_at'] = self._now_str()
+        with self.active_lock:
+            self.active_downloads[job_id] = entry
+
+    def _patch_active_download(self, job_id: str, **kwargs):
+        """Update active download entry and refresh updated timestamp."""
+        with self.active_lock:
+            if job_id in self.active_downloads:
+                self.active_downloads[job_id].update(kwargs)
+                self.active_downloads[job_id]['updated_at'] = self._now_str()
+
+    def _cleanup_finished_downloads(self):
+        """Drop terminal jobs after retention to avoid unbounded growth."""
+        cutoff = datetime.now() - timedelta(seconds=self.completed_retention_seconds)
+        stale_ids = []
+
+        with self.active_lock:
+            for job_id, job in self.active_downloads.items():
+                if job.get('status') not in {'completed', 'error', 'skipped'}:
+                    continue
+
+                stamp = self._parse_dt(job.get('updated_at') or job.get('completed_at'))
+                if not stamp:
+                    continue
+
+                if stamp <= cutoff:
+                    stale_ids.append(job_id)
+
+            for job_id in stale_ids:
+                self.active_downloads.pop(job_id, None)
     
     def add(
         self,
@@ -64,10 +112,17 @@ class QueueService:
     
     def get_all(self) -> dict:
         """Get queue status."""
+        self._cleanup_finished_downloads()
+        with self.queue_lock:
+            queue_snapshot = self.queue.copy()
+            total = len(self.queue)
+        with self.active_lock:
+            active_snapshot = list(self.active_downloads.values())
+
         return {
-            'queue': self.queue.copy(),
-            'active': list(self.active_downloads.values()),
-            'total': len(self.queue)
+            'queue': queue_snapshot,
+            'active': active_snapshot,
+            'total': total
         }
     
     def remove(self, item_id: str) -> bool:
@@ -86,11 +141,15 @@ class QueueService:
     
     def get_download(self, job_id: str) -> dict:
         """Get active download status."""
-        return self.active_downloads.get(job_id)
+        self._cleanup_finished_downloads()
+        with self.active_lock:
+            return self.active_downloads.get(job_id)
     
     def get_all_downloads(self) -> list:
         """Get all active downloads."""
-        return list(self.active_downloads.values())
+        self._cleanup_finished_downloads()
+        with self.active_lock:
+            return list(self.active_downloads.values())
     
     def create_download(self, url: str, audio_format: str, quality: str) -> str:
         """Create a new download job."""
@@ -98,7 +157,7 @@ class QueueService:
         
         job_id = str(uuid.uuid4())[:8]
         
-        self.active_downloads[job_id] = {
+        self._set_active_download(job_id, {
             'id': job_id,
             'url': url,
             'status': 'pending',
@@ -111,14 +170,13 @@ class QueueService:
             'output_dir': str(config.DOWNLOAD_DIR),
             'started_at': None,
             'completed_at': None,
-        }
+        })
         
         return job_id
     
     def update_download(self, job_id: str, **kwargs):
         """Update download status."""
-        if job_id in self.active_downloads:
-            self.active_downloads[job_id].update(kwargs)
+        self._patch_active_download(job_id, **kwargs)
     
     def _start_processing(self):
         """Start queue processing thread."""
@@ -154,7 +212,7 @@ class QueueService:
                     duration=item.get('duration'),
                 )
                 if is_duplicate:
-                    self.active_downloads[job_id] = {
+                    self._set_active_download(job_id, {
                         'id': job_id,
                         'url': item['url'],
                         'status': 'skipped',
@@ -165,8 +223,8 @@ class QueueService:
                         'quality': item['quality'],
                         'output_dir': str(config.DOWNLOAD_DIR),
                         'existing_file': existing_file,
-                        'completed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    }
+                        'completed_at': self._now_str(),
+                    })
                     item['status'] = 'skipped'
 
                     with self.queue_lock:
@@ -175,7 +233,7 @@ class QueueService:
                     continue
             
             try:
-                self.active_downloads[job_id] = {
+                self._set_active_download(job_id, {
                     'id': job_id,
                     'url': item['url'],
                     'status': 'downloading',
@@ -188,7 +246,7 @@ class QueueService:
                     'format': item['format'],
                     'quality': item['quality'],
                     'output_dir': str(config.DOWNLOAD_DIR),
-                }
+                })
                 
                 downloader = YTMusicDownloader(
                     output_dir=str(config.DOWNLOAD_DIR),
@@ -200,16 +258,61 @@ class QueueService:
                 result = downloader.download(item['url'])
                 
                 if result.get('success'):
-                    self.active_downloads[job_id]['status'] = 'completed'
-                    self.active_downloads[job_id]['completed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    result_filename = os.path.basename(result.get('filename', '') or '')
+
+                    # Persist queue downloads to library/history DB.
+                    with app.app_context():
+                        track_title = result.get('title') or item.get('title') or 'Unknown'
+                        track_video_id = item.get('video_id') or result.get('id') or ''
+                        track_artist = (
+                            result.get('artist')
+                            or result.get('uploader')
+                            or item.get('artist')
+                            or 'Unknown'
+                        )
+                        track_duration = result.get('duration') or item.get('duration', 0)
+                        track_thumbnail = result.get('thumbnail') or item.get('thumbnail') or ''
+
+                        is_duplicate, _ = Download.check_duplicate(
+                            title=track_title,
+                            video_id=track_video_id,
+                            artist=track_artist,
+                            duration=track_duration,
+                        )
+                        if not is_duplicate:
+                            file_size = 0
+                            if result_filename:
+                                file_path = config.DOWNLOAD_DIR / result_filename
+                                if file_path.exists():
+                                    file_size = file_path.stat().st_size
+
+                            Download.add(
+                                video_id=track_video_id,
+                                title=track_title,
+                                artist=track_artist,
+                                filename=result_filename,
+                                format=item['format'],
+                                quality=item['quality'],
+                                thumbnail=track_thumbnail,
+                                duration=track_duration,
+                                file_size=file_size,
+                            )
+
+                    self._patch_active_download(
+                        job_id,
+                        status='completed',
+                        completed_at=self._now_str(),
+                        filename=result_filename,
+                    )
                 else:
-                    self.active_downloads[job_id]['status'] = 'error'
-                    self.active_downloads[job_id]['error'] = result.get('error', 'Unknown error')
+                    self._patch_active_download(
+                        job_id,
+                        status='error',
+                        error=result.get('error', 'Unknown error'),
+                    )
                     
             except Exception as e:
-                if job_id in self.active_downloads:
-                    self.active_downloads[job_id]['status'] = 'error'
-                    self.active_downloads[job_id]['error'] = str(e)
+                self._patch_active_download(job_id, status='error', error=str(e))
             
             # Remove from queue
             with self.queue_lock:

@@ -7,6 +7,7 @@ import re
 import threading
 from datetime import datetime
 from flask import Blueprint, jsonify, request, render_template, send_from_directory
+from sqlalchemy import func
 
 from config import config
 from app.utils import is_valid_url, is_playlist, format_duration
@@ -14,6 +15,81 @@ from app.services.youtube import YouTubeService
 from app.services.queue_service import queue_service
 
 bp = Blueprint('api', __name__)
+
+
+def _normalize_playlist_name(name: str) -> str:
+    """Normalize playlist name and enforce DB length limits."""
+    cleaned = re.sub(r'\s+', ' ', str(name or '').strip())
+    return cleaned[:120]
+
+
+def _build_unique_playlist_name(base_name: str) -> str:
+    """Generate a unique playlist name by appending numeric suffixes."""
+    from app.models import Playlist
+
+    normalized = _normalize_playlist_name(base_name)
+    if not normalized:
+        normalized = datetime.now().strftime('Playlist %Y-%m-%d %H:%M')
+
+    candidate = normalized
+    suffix = 2
+    while Playlist.query.filter(func.lower(Playlist.name) == candidate.lower()).first():
+        suffix_text = f" ({suffix})"
+        trimmed = normalized[: max(1, 120 - len(suffix_text))]
+        candidate = f"{trimmed}{suffix_text}"
+        suffix += 1
+    return candidate
+
+
+def _attach_download_to_playlist(playlist_id: int, download_id: int) -> bool:
+    """Add a downloaded song to playlist if not already mapped."""
+    from app.models import db, PlaylistSong
+
+    if not playlist_id or not download_id:
+        return False
+
+    existing = PlaylistSong.query.filter_by(
+        playlist_id=playlist_id,
+        download_id=download_id,
+    ).first()
+    if existing:
+        return True
+
+    db.session.add(PlaylistSong(playlist_id=playlist_id, download_id=download_id))
+    db.session.commit()
+    return True
+
+
+def _find_library_song_for_playlist(song: dict, existing_file: str = ''):
+    """
+    Resolve a song payload to an existing Download row when duplicates are skipped.
+    """
+    from app.models import Download
+
+    video_id = str(song.get('id') or '').strip()
+    if video_id:
+        existing = Download.get_by_video_id(video_id)
+        if existing:
+            return existing
+
+    filename = os.path.basename(existing_file or '')
+    if filename:
+        existing = Download.get_by_filename(filename)
+        if existing:
+            return existing
+
+    title = song.get('title', '')
+    artist = song.get('uploader')
+    duration = song.get('duration')
+    is_duplicate, matched_file = Download.check_duplicate(
+        title=title,
+        video_id=video_id,
+        artist=artist,
+        duration=duration,
+    )
+    if is_duplicate and matched_file:
+        return Download.get_by_filename(matched_file)
+    return None
 
 
 @bp.route('/')
@@ -482,14 +558,19 @@ def start_playlist_download():
     import uuid
     from app.services.playlist_download_service import playlist_download_service
     
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     selected_songs = data.get('songs', [])
+    create_playlist = bool(data.get('create_playlist'))
+    playlist_name = _normalize_playlist_name(data.get('playlist_name', ''))
     
     if not selected_songs:
         return jsonify({'error': 'No songs provided'}), 400
     
     session_id = str(uuid.uuid4())[:8]
-    playlist_download_service.create_session(session_id, selected_songs)
+    session = playlist_download_service.create_session(session_id, selected_songs)
+    session['create_playlist'] = create_playlist
+    session['playlist_name'] = playlist_name
+    session['playlist_id'] = None
     
     thread = threading.Thread(
         target=_background_playlist_download,
@@ -519,7 +600,7 @@ def _background_playlist_download(session_id):
     from app import create_app
     from app.services.playlist_download_service import playlist_download_service
     from app.downloader import YTMusicDownloader
-    from app.models import Download
+    from app.models import db, Download, Playlist
     
     session = playlist_download_service.get_session(session_id)
     if not session:
@@ -528,21 +609,58 @@ def _background_playlist_download(session_id):
     print(f"[PLAYLIST:{session_id}] Starting download of {session['total']} songs", flush=True)
     
     app = create_app()
+    playlist_id = None
+
+    # Optionally auto-create a playlist that will contain all selected songs.
+    if session.get('create_playlist'):
+        with app.app_context():
+            try:
+                requested_name = session.get('playlist_name', '')
+                unique_name = _build_unique_playlist_name(requested_name)
+                playlist = Playlist(name=unique_name)
+                db.session.add(playlist)
+                db.session.commit()
+                playlist_id = playlist.id
+                session['playlist_id'] = playlist_id
+                session['playlist_name'] = playlist.name
+                print(
+                    f"[PLAYLIST:{session_id}] Created playlist '{playlist.name}' (id={playlist_id})",
+                    flush=True,
+                )
+            except Exception as playlist_err:
+                db.session.rollback()
+                session['playlist_id'] = None
+                print(
+                    f"[PLAYLIST:{session_id}] Failed to create playlist: {playlist_err}",
+                    flush=True,
+                )
 
     for idx, song in enumerate(session['songs']):
         print(f"[PLAYLIST:{session_id}] Processing song {idx + 1}/{session['total']}: {song['title']}", flush=True)
+        session_song_id = song.get('session_song_id') or f"{song.get('id', 'song')}::{idx}"
 
         with app.app_context():
-            is_duplicate, _ = Download.check_duplicate(
+            is_duplicate, existing_file = Download.check_duplicate(
                 title=song.get('title', ''),
                 video_id=song.get('id'),
                 artist=song.get('uploader'),
                 duration=song.get('duration'),
             )
+            if is_duplicate and playlist_id:
+                existing_download = _find_library_song_for_playlist(song, existing_file)
+                if existing_download:
+                    try:
+                        _attach_download_to_playlist(playlist_id, existing_download.id)
+                    except Exception as attach_err:
+                        db.session.rollback()
+                        print(
+                            f"[PLAYLIST:{session_id}] Failed to map duplicate song to playlist: {attach_err}",
+                            flush=True,
+                        )
         if is_duplicate:
             playlist_download_service.update_song_status(
                 session_id,
-                song['id'],
+                session_song_id,
                 'completed',
                 progress=100,
             )
@@ -550,15 +668,15 @@ def _background_playlist_download(session_id):
             continue
 
         playlist_download_service.update_song_status(
-            session_id, song['id'], 'downloading', progress=0
+            session_id, session_song_id, 'downloading', progress=0
         )
         
         try:
-            def progress_callback(data):
+            def progress_callback(data, song_key=session_song_id):
                 if data.get('status') == 'downloading':
                     playlist_download_service.update_song_status(
                         session_id,
-                        song['id'],
+                        song_key,
                         'downloading',
                         progress=int(data.get('downloaded_bytes', 0) / max(data.get('total_bytes', 1), 1) * 100),
                         speed=data.get('speed', 0),
@@ -574,7 +692,7 @@ def _background_playlist_download(session_id):
             
             if result.get('success'):
                 playlist_download_service.update_song_status(
-                    session_id, song['id'], 'completed', progress=100
+                    session_id, session_song_id, 'completed', progress=100
                 )
                 playlist_download_service.increment_completed(session_id)
                 
@@ -585,28 +703,68 @@ def _background_playlist_download(session_id):
                 
                 # Save to database with app context
                 with app.app_context():
-                    is_duplicate, _ = Download.check_duplicate(
-                        title=result.get('title') or song.get('title'),
-                        video_id=song.get('id') or result.get('id'),
-                        artist=result.get('uploader') or song.get('uploader'),
-                        duration=result.get('duration') or song.get('duration', 0),
+                    track_title = result.get('title') or song.get('title')
+                    track_video_id = song.get('id') or result.get('id')
+                    track_artist = result.get('uploader') or song.get('uploader')
+                    track_duration = result.get('duration') or song.get('duration', 0)
+                    track_filename = os.path.basename(result.get('filename', ''))
+
+                    is_duplicate, existing_file = Download.check_duplicate(
+                        title=track_title,
+                        video_id=track_video_id,
+                        artist=track_artist,
+                        duration=track_duration,
                     )
+
+                    download_row = None
                     if not is_duplicate:
-                        Download.add(
-                            video_id=song.get('id') or result.get('id'),
-                            title=result.get('title') or song.get('title'),
-                            artist=result.get('uploader') or song.get('uploader', 'Unknown'),
-                            filename=os.path.basename(result.get('filename', '')),
+                        download_row = Download.add(
+                            video_id=track_video_id,
+                            title=track_title,
+                            artist=track_artist or 'Unknown',
+                            filename=track_filename,
                             thumbnail=thumbnail or '',
-                            duration=result.get('duration') or song.get('duration', 0),
-                            file_size=result.get('filesize', 0)
+                            duration=track_duration,
+                            file_size=result.get('filesize', 0) or 0,
                         )
+                    else:
+                        song_lookup_payload = {
+                            'id': track_video_id,
+                            'title': track_title,
+                            'uploader': track_artist,
+                            'duration': track_duration,
+                        }
+                        download_row = _find_library_song_for_playlist(
+                            song_lookup_payload,
+                            existing_file=existing_file or track_filename,
+                        )
+
+                    if not download_row:
+                        download_row = _find_library_song_for_playlist(
+                            {
+                                'id': track_video_id,
+                                'title': track_title,
+                                'uploader': track_artist,
+                                'duration': track_duration,
+                            },
+                            existing_file=track_filename,
+                        )
+
+                    if playlist_id and download_row:
+                        try:
+                            _attach_download_to_playlist(playlist_id, download_row.id)
+                        except Exception as attach_err:
+                            db.session.rollback()
+                            print(
+                                f"[PLAYLIST:{session_id}] Failed to add song to playlist: {attach_err}",
+                                flush=True,
+                            )
                 
                 print(f"[PLAYLIST:{session_id}] ✓ Completed: {song['title']}", flush=True)
             else:
                 error_msg = result.get('error', 'Unknown error')
                 playlist_download_service.update_song_status(
-                    session_id, song['id'], 'failed', error=error_msg
+                    session_id, session_song_id, 'failed', error=error_msg
                 )
                 playlist_download_service.increment_failed(session_id)
                 print(f"[PLAYLIST:{session_id}] ✗ Failed: {song['title']} - {error_msg}", flush=True)
@@ -614,7 +772,7 @@ def _background_playlist_download(session_id):
         except Exception as e:
             error_msg = str(e)
             playlist_download_service.update_song_status(
-                session_id, song['id'], 'failed', error=error_msg
+                session_id, session_song_id, 'failed', error=error_msg
             )
             playlist_download_service.increment_failed(session_id)
             print(f"[PLAYLIST:{session_id}] ✗ Exception: {song['title']} - {error_msg}", flush=True)
