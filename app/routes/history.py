@@ -4,17 +4,26 @@ History Routes - Get and clear download history.
 
 import os
 import re
-import shutil
-import subprocess
 from datetime import datetime
 
 from flask import Blueprint, jsonify
 from app.models import Download, PlaylistSong, db
-from config import config
+from app.storage_paths import get_download_dir, get_thumbnails_dir
+from app.download_preferences import get_preferred_audio_exts, get_default_quality_label
 
 bp = Blueprint('history', __name__)
 
 AUDIO_EXTENSIONS = {'.m4a', '.mp3', '.aac', '.ogg', '.opus', '.flac', '.wav', '.webm', '.mka'}
+
+
+def _audio_ext_rank(ext: str, preferred_exts=None) -> int:
+    """Return deterministic extension preference rank (lower is better)."""
+    order = preferred_exts or get_preferred_audio_exts()
+    normalized = str(ext or '').lower()
+    try:
+        return order.index(normalized)
+    except ValueError:
+        return len(order)
 
 
 def _extract_video_id_from_filename(filename: str) -> str:
@@ -22,6 +31,31 @@ def _extract_video_id_from_filename(filename: str) -> str:
     stem = os.path.splitext(os.path.basename(filename or ''))[0]
     match = re.search(r'\[([A-Za-z0-9_-]{11})\]', stem)
     return match.group(1) if match else ''
+
+
+def _normalized_stem(filename: str) -> str:
+    """Normalize filename stem for stable grouping."""
+    stem = os.path.splitext(os.path.basename(filename or ''))[0]
+    stem = re.sub(r'\s*\[[A-Za-z0-9_-]{11}\]\s*$', '', stem).strip().lower()
+    stem = re.sub(r'\s+', ' ', stem)
+    return stem
+
+
+def _canonical_track_key(filename: str, video_id: str = '') -> str:
+    """Build a stable key to group duplicate variants of the same song."""
+    extracted_video_id = _extract_video_id_from_filename(filename)
+    if extracted_video_id:
+        return f"vid:{extracted_video_id}"
+
+    raw_video_id = str(video_id or '').strip()
+    if raw_video_id and not raw_video_id.startswith('local_'):
+        return f"vid:{raw_video_id}"
+
+    stem = _normalized_stem(filename)
+    if stem:
+        return f"stem:{stem}"
+
+    return f"file:{os.path.basename(filename or '').lower()}"
 
 
 def _derive_title_artist_from_filename(filename: str):
@@ -41,8 +75,9 @@ def _thumbnail_for_video_id(video_id: str) -> str:
     if not video_id:
         return ''
 
+    thumbnails_dir = get_thumbnails_dir()
     for ext in ('.webp', '.jpg', '.png', '.jpeg'):
-        local_path = config.THUMBNAILS_DIR / f"{video_id}{ext}"
+        local_path = thumbnails_dir / f"{video_id}{ext}"
         if local_path.exists() and local_path.is_file():
             return f"/api/thumbnails/{video_id}{ext}"
 
@@ -52,24 +87,59 @@ def _thumbnail_for_video_id(video_id: str) -> str:
 def _sync_missing_download_rows(downloads: list) -> bool:
     """Ensure each audio file on disk exists in downloads table."""
     existing_filenames = {str(d.filename or '') for d in downloads}
+    existing_key_rank = {}
+    preferred_exts = get_preferred_audio_exts()
+
+    for row in downloads:
+        filename = str(row.filename or '')
+        if not filename:
+            continue
+        key = _canonical_track_key(filename, getattr(row, 'video_id', ''))
+        ext_rank = _audio_ext_rank(os.path.splitext(filename)[1], preferred_exts)
+        current_rank = existing_key_rank.get(key)
+        if current_rank is None or ext_rank < current_rank:
+            existing_key_rank[key] = ext_rank
+
     added = False
 
-    if not config.DOWNLOAD_DIR.exists():
+    download_dir = get_download_dir()
+    if not download_dir.exists():
         return False
 
-    for path in config.DOWNLOAD_DIR.iterdir():
+    disk_audio_paths = []
+    for path in download_dir.iterdir():
         if not path.is_file():
             continue
         if path.name.startswith('.'):
             continue
         if path.suffix.lower() not in AUDIO_EXTENSIONS:
             continue
+        disk_audio_paths.append(path)
+
+    # Process better-supported variants first, so .m4a/.mp3 rows win over .webm/.mka.
+    disk_audio_paths.sort(key=lambda p: (_audio_ext_rank(p.suffix, preferred_exts), p.name.lower()))
+
+    for path in disk_audio_paths:
         if path.name in existing_filenames:
+            key = _canonical_track_key(path.name, _extract_video_id_from_filename(path.name))
+            existing_key_rank[key] = min(
+                _audio_ext_rank(path.suffix, preferred_exts),
+                existing_key_rank.get(key, len(preferred_exts)),
+            )
             continue
 
         title, artist = _derive_title_artist_from_filename(path.name)
         video_id = _extract_video_id_from_filename(path.name)
         thumbnail = _thumbnail_for_video_id(video_id)
+        track_key = _canonical_track_key(path.name, video_id)
+        ext_rank = _audio_ext_rank(path.suffix, preferred_exts)
+
+        # Skip inferior variants when a better one already exists in DB.
+        prior_rank = existing_key_rank.get(track_key)
+        if prior_rank is not None and prior_rank <= ext_rank:
+            continue
+
+        quality_label = get_default_quality_label()
 
         db.session.add(Download(
             video_id=video_id or '',
@@ -77,12 +147,14 @@ def _sync_missing_download_rows(downloads: list) -> bool:
             artist=artist,
             filename=path.name,
             format=path.suffix.lower().lstrip('.') or 'm4a',
-            quality='320kbps',
+            quality=quality_label,
             thumbnail=thumbnail,
             duration=0,
             file_size=path.stat().st_size if path.exists() else 0,
             downloaded_at=datetime.fromtimestamp(path.stat().st_mtime) if path.exists() else datetime.utcnow(),
         ))
+        existing_filenames.add(path.name)
+        existing_key_rank[track_key] = ext_rank
         added = True
 
     return added
@@ -90,13 +162,13 @@ def _sync_missing_download_rows(downloads: list) -> bool:
 
 def _find_existing_audio_variant(filename: str):
     """Resolve stale DB filename to an existing audio file if possible."""
-    preferred_exts = ['.m4a', '.mp3', '.aac', '.ogg', '.opus', '.flac', '.wav', '.webm', '.mka']
-
     safe_name = os.path.basename(filename or '')
     if not safe_name:
         return None
 
-    requested_path = config.DOWNLOAD_DIR / safe_name
+    download_dir = get_download_dir()
+    preferred_exts = get_preferred_audio_exts()
+    requested_path = download_dir / safe_name
     if (
         requested_path.exists()
         and requested_path.is_file()
@@ -107,7 +179,7 @@ def _find_existing_audio_variant(filename: str):
     # 1) Same stem, different extension
     stem = requested_path.stem
     for ext in preferred_exts:
-        candidate = config.DOWNLOAD_DIR / f"{stem}{ext}"
+        candidate = download_dir / f"{stem}{ext}"
         if candidate.exists() and candidate.is_file():
             return candidate.name
 
@@ -116,16 +188,12 @@ def _find_existing_audio_variant(filename: str):
     if match:
         video_id = match.group(1)
         candidates = [
-            p for p in config.DOWNLOAD_DIR.glob(f"* [{video_id}].*")
+            p for p in download_dir.glob(f"* [{video_id}].*")
             if p.is_file()
         ]
         if candidates:
             def ext_rank(path):
-                ext = path.suffix.lower()
-                try:
-                    return preferred_exts.index(ext)
-                except ValueError:
-                    return len(preferred_exts)
+                return _audio_ext_rank(path.suffix, preferred_exts)
 
             candidates.sort(key=ext_rank)
             return candidates[0].name
@@ -133,48 +201,54 @@ def _find_existing_audio_variant(filename: str):
     return None
 
 
-def _convert_webm_to_m4a(filename: str):
-    """Convert .webm audio to .m4a for better browser compatibility."""
-    source_path = config.DOWNLOAD_DIR / filename
-    if source_path.suffix.lower() != '.webm':
-        return filename
+def _dedupe_library_rows(downloads: list) -> bool:
+    """Keep one best DB row per canonical track and drop inferior duplicates."""
+    grouped = {}
+    preferred_exts = get_preferred_audio_exts()
+    for row in downloads:
+        filename = str(row.filename or '')
+        if not filename:
+            continue
+        resolved_name = _find_existing_audio_variant(filename) or filename
+        key = _canonical_track_key(resolved_name, row.video_id)
+        grouped.setdefault(key, []).append((row, resolved_name))
 
-    target_path = source_path.with_suffix('.m4a')
-    if target_path.exists() and target_path.is_file():
-        return target_path.name
+    changed = False
+    for items in grouped.values():
+        if len(items) <= 1:
+            continue
 
-    if not shutil.which('ffmpeg'):
-        return filename
-
-    try:
-        cmd = [
-            'ffmpeg',
-            '-y',
-            '-i',
-            str(source_path),
-            '-vn',
-            '-c:a',
-            'aac',
-            '-b:a',
-            '192k',
-            str(target_path),
-        ]
-        subprocess.run(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+        items.sort(
+            key=lambda item: (
+                _audio_ext_rank(os.path.splitext(item[1])[1], preferred_exts),
+                -(item[0].downloaded_at.timestamp() if item[0].downloaded_at else 0),
+                item[0].id,
+            )
         )
-        if target_path.exists() and target_path.stat().st_size > 0:
-            try:
-                source_path.unlink()
-            except Exception:
-                pass
-            return target_path.name
-    except Exception:
-        return filename
 
-    return filename
+        keep_row, keep_name = items[0]
+        if keep_name and keep_row.filename != keep_name:
+            keep_row.filename = keep_name
+            changed = True
+
+        for duplicate_row, _ in items[1:]:
+            playlist_links = PlaylistSong.query.filter_by(download_id=duplicate_row.id).all()
+            for link in playlist_links:
+                existing = PlaylistSong.query.filter_by(
+                    playlist_id=link.playlist_id,
+                    download_id=keep_row.id,
+                ).first()
+                if not existing:
+                    db.session.add(PlaylistSong(
+                        playlist_id=link.playlist_id,
+                        download_id=keep_row.id,
+                    ))
+
+            PlaylistSong.query.filter_by(download_id=duplicate_row.id).delete(synchronize_session=False)
+            db.session.delete(duplicate_row)
+            changed = True
+
+    return changed
 
 
 @bp.route('/history', methods=['GET'])
@@ -191,6 +265,12 @@ def get_history():
             Download.invalidate_duplicate_cache()
             downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
 
+        if _dedupe_library_rows(downloads):
+            changed = True
+            db.session.commit()
+            Download.invalidate_duplicate_cache()
+            downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
+
         for download in downloads:
             if not download.filename:
                 continue
@@ -199,17 +279,28 @@ def get_history():
 
             # If no actual file exists for this record, remove stale DB row.
             if not fixed_name:
+                PlaylistSong.query.filter_by(download_id=download.id).delete(synchronize_session=False)
                 db.session.delete(download)
                 changed = True
                 continue
 
-            # If a different existing variant is found (e.g. .m4a instead of stale .webm), repair it.
-            if fixed_name and fixed_name.lower().endswith('.webm') and (download.format or '').lower() == 'm4a':
-                fixed_name = _convert_webm_to_m4a(fixed_name)
-
             if fixed_name != download.filename:
                 download.filename = fixed_name
+                new_ext = os.path.splitext(fixed_name)[1].lower().lstrip('.')
+                if new_ext:
+                    download.format = new_ext
                 changed = True
+
+            # Backfill thumbnail when missing using local file first, then YouTube fallback.
+            if not str(download.thumbnail or '').strip():
+                video_id = str(download.video_id or '').strip()
+                if not video_id:
+                    video_id = _extract_video_id_from_filename(fixed_name)
+                if video_id and not video_id.startswith('local_'):
+                    resolved_thumb = _thumbnail_for_video_id(video_id)
+                    if resolved_thumb:
+                        download.thumbnail = resolved_thumb
+                        changed = True
 
         if changed:
             db.session.commit()
@@ -255,7 +346,7 @@ def delete_download(download_id):
     # Delete file from filesystem
     if download.filename:
         resolved_name = _find_existing_audio_variant(download.filename) or download.filename
-        filepath = config.DOWNLOAD_DIR / resolved_name
+        filepath = get_download_dir() / resolved_name
         if filepath.exists():
             try:
                 filepath.unlink()

@@ -7,6 +7,8 @@ import re
 import threading
 from datetime import datetime
 from .database import db
+from app.storage_paths import get_download_dir, get_thumbnails_dir
+from app.download_preferences import get_default_quality_label
 
 
 class Download(db.Model):
@@ -33,17 +35,16 @@ class Download(db.Model):
     
     def to_dict(self):
         """Convert to dictionary for JSON response."""
-        from config import config
-        
         # Generate thumbnail using local file if available, else remote
         thumbnail = None
         real_video_id = self._extract_video_id()
+        thumbnails_dir = get_thumbnails_dir()
         
         # Try to find a local thumbnail
         if real_video_id:
             for ext in ['.webp', '.jpg', '.png', '.jpeg']:
                 thumb_name = f"{real_video_id}{ext}"
-                if (config.THUMBNAILS_DIR / thumb_name).exists():
+                if (thumbnails_dir / thumb_name).exists():
                     thumbnail = f"/api/thumbnails/{thumb_name}"
                     break
         
@@ -73,8 +74,6 @@ class Download(db.Model):
     
     def _extract_video_id(self):
         """Extract real YouTube video ID from video_id or filename."""
-        from config import config
-        
         # If video_id is a real YouTube ID (not local_*), use it
         if self.video_id and not self.video_id.startswith('local_'):
             return self.video_id
@@ -86,13 +85,14 @@ class Download(db.Model):
                 return match.group(1)
         
         # Fallback: Try to match by file timestamp with thumbnail files
-        if self.filename and config.THUMBNAILS_DIR.exists():
+        thumbnails_dir = get_thumbnails_dir()
+        if self.filename and thumbnails_dir.exists():
             try:
-                audio_path = config.DOWNLOAD_DIR / self.filename
+                audio_path = get_download_dir() / self.filename
                 if audio_path.exists():
                     audio_mtime = audio_path.stat().st_mtime
                     # Look for thumbnail with matching timestamp (within 5 seconds)
-                    for thumb_file in config.THUMBNAILS_DIR.iterdir():
+                    for thumb_file in thumbnails_dir.iterdir():
                         if thumb_file.is_file() and thumb_file.suffix.lower() in ['.webp', '.jpg', '.png', '.jpeg']:
                             thumb_mtime = thumb_file.stat().st_mtime
                             if abs(audio_mtime - thumb_mtime) < 5:
@@ -238,20 +238,24 @@ class Download(db.Model):
     def _delete_stale_records(cls, stale_ids):
         if not stale_ids:
             return
-        from config import config
+
+        from app.models import PlaylistSong
 
         stale_rows = cls.query.filter(cls.id.in_(list(stale_ids))).all()
         deleted = False
+        download_dir = get_download_dir()
 
         for row in stale_rows:
             filename = os.path.basename((row.filename or '').strip())
             if not filename:
+                PlaylistSong.query.filter_by(download_id=row.id).delete(synchronize_session=False)
                 db.session.delete(row)
                 deleted = True
                 continue
 
-            filepath = config.DOWNLOAD_DIR / filename
+            filepath = download_dir / filename
             if not filepath.exists():
+                PlaylistSong.query.filter_by(download_id=row.id).delete(synchronize_session=False)
                 db.session.delete(row)
                 deleted = True
 
@@ -292,8 +296,11 @@ class Download(db.Model):
     @classmethod
     def get_history(cls, limit=100):
         """Get download history with auto-sync from filesystem."""
-        from config import config
+        from app.models import PlaylistSong
+
         changes_made = False
+        download_dir = get_download_dir()
+        thumbnails_dir = get_thumbnails_dir()
         
         # 1. Get all known files from DB
         db_records = cls.query.all()
@@ -301,8 +308,8 @@ class Download(db.Model):
         
         # 2. Get all actual files from disk
         disk_files = []
-        if config.DOWNLOAD_DIR.exists():
-            for f in config.DOWNLOAD_DIR.iterdir():
+        if download_dir.exists():
+            for f in download_dir.iterdir():
                 if f.is_file() and not f.name.startswith('.'):
                     disk_files.append(f.name)
         
@@ -311,6 +318,7 @@ class Download(db.Model):
         # A. Remove DB records for files that no longer exist on disk
         for filename, record in db_files.items():
             if filename not in disk_files:
+                PlaylistSong.query.filter_by(download_id=record.id).delete(synchronize_session=False)
                 db.session.delete(record)
                 changes_made = True
         
@@ -338,7 +346,7 @@ class Download(db.Model):
                     video_id = yt_id_match.group(1)
                     # Check for local thumbnail first
                     for ext in ['.webp', '.jpg', '.png', '.jpeg']:
-                        thumb_path = config.THUMBNAILS_DIR / f"{video_id}{ext}"
+                        thumb_path = thumbnails_dir / f"{video_id}{ext}"
                         if thumb_path.exists():
                             thumbnail = f"/api/thumbnails/{video_id}{ext}"
                             break
@@ -349,7 +357,7 @@ class Download(db.Model):
                     video_id = f"local_{abs(hash(filename))}"[:20]
                 
                 # Get file stats
-                filepath = config.DOWNLOAD_DIR / filename
+                filepath = download_dir / filename
                 try:
                     stat = filepath.stat()
                     file_size = stat.st_size
@@ -362,6 +370,7 @@ class Download(db.Model):
                     title=title,
                     artist=artist,
                     filename=filename,
+                    quality=get_default_quality_label(),
                     file_size=file_size,
                     downloaded_at=downloaded_at,
                     video_id=video_id,
@@ -390,9 +399,8 @@ class Download(db.Model):
         1) Exact video_id match (indexed).
         2) Strict normalized title + artist + duration-tolerant match.
         """
-        from config import config
-
         cache = cls._ensure_duplicate_cache()
+        download_dir = get_download_dir()
         video_id = (video_id or '').strip()
         title_norm = cls._normalize_title(title)
         artist_norm = cls._normalize_artist(artist)
@@ -426,7 +434,7 @@ class Download(db.Model):
             if not filename:
                 continue
 
-            filepath = config.DOWNLOAD_DIR / filename
+            filepath = download_dir / filename
             if filepath.exists():
                 return True, filename
 

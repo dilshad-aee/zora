@@ -11,6 +11,7 @@ Features:
 import os
 import shutil
 import glob
+from pathlib import Path
 from typing import Callable, Optional, List
 import yt_dlp
 
@@ -220,8 +221,6 @@ class YTMusicDownloader:
         """Hook to save thumbnail before it gets embedded/deleted."""
         if d['status'] == 'finished':
             try:
-                from config import config
-                
                 # Get the downloaded filename (e.g. Song.m4a)
                 filename = d.get('filename')
                 if not filename:
@@ -245,8 +244,10 @@ class YTMusicDownloader:
                             target_name = f"{video_id}{ext}"
                         else:
                             target_name = f"local_{os.path.basename(thumb_path)}"
-                            
-                        target_path = config.THUMBNAILS_DIR / target_name
+
+                        thumbnails_dir = Path(self.output_dir) / 'thumbnails'
+                        thumbnails_dir.mkdir(parents=True, exist_ok=True)
+                        target_path = thumbnails_dir / target_name
                         
                         # Copy it (copy instead of move in case EmbedThumbnail needs it)
                         shutil.copy2(thumb_path, target_path)

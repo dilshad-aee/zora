@@ -9,12 +9,28 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, render_template, send_from_directory
 from sqlalchemy import func
 
-from config import config
 from app.utils import is_valid_url, is_playlist, format_duration
 from app.services.youtube import YouTubeService
 from app.services.queue_service import queue_service
+from app.storage_paths import get_download_dir, get_thumbnails_dir
+from app.download_preferences import (
+    get_default_download_preferences,
+    get_preferred_audio_exts,
+)
 
 bp = Blueprint('api', __name__)
+
+BROWSER_SAFE_AUDIO_EXTS = {'.m4a', '.mp3', '.aac', '.ogg', '.wav'}
+
+
+def _audio_ext_rank(ext: str, preferred_exts=None) -> int:
+    """Return deterministic extension preference rank (lower is better)."""
+    order = preferred_exts or get_preferred_audio_exts()
+    normalized = str(ext or '').lower()
+    try:
+        return order.index(normalized)
+    except ValueError:
+        return len(order)
 
 
 def _normalize_playlist_name(name: str) -> str:
@@ -171,10 +187,11 @@ def get_playlist_items():
 @bp.route('/api/download', methods=['POST'])
 def start_download():
     """Start a new download."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     url = data.get('url', '').strip()
-    audio_format = data.get('format', 'm4a')
-    quality = data.get('quality', '320')
+    default_format, default_quality = get_default_download_preferences()
+    audio_format = str(data.get('format') or default_format).lower().lstrip('.')
+    quality = str(data.get('quality') or default_quality).strip()
     force = data.get('force', False)
     
     if not url:
@@ -304,7 +321,7 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
     
     try:
         downloader = YTMusicDownloader(
-            output_dir=str(config.DOWNLOAD_DIR),
+            output_dir=str(get_download_dir()),
             audio_format=audio_format,
             quality=quality,
             on_progress=on_progress,
@@ -394,13 +411,13 @@ def _resolve_playable_filename(requested_filename: str):
 
     Supports fallback when DB has stale names like `.webm` while disk has `.m4a`.
     """
-    preferred_exts = ['.m4a', '.mp3', '.aac', '.ogg', '.opus', '.flac', '.wav', '.webm', '.mka']
-
     safe_name = os.path.basename(requested_filename or '')
     if not safe_name:
         return None
+    download_dir = get_download_dir()
+    preferred_exts = get_preferred_audio_exts()
 
-    requested_path = config.DOWNLOAD_DIR / safe_name
+    requested_path = download_dir / safe_name
     if (
         requested_path.exists()
         and requested_path.is_file()
@@ -411,7 +428,7 @@ def _resolve_playable_filename(requested_filename: str):
     # 1) Same stem, different extension
     stem = requested_path.stem
     for ext in preferred_exts:
-        candidate = config.DOWNLOAD_DIR / f"{stem}{ext}"
+        candidate = download_dir / f"{stem}{ext}"
         if candidate.exists() and candidate.is_file():
             return candidate.name
 
@@ -420,16 +437,12 @@ def _resolve_playable_filename(requested_filename: str):
     if match:
         video_id = match.group(1)
         candidates = [
-            p for p in config.DOWNLOAD_DIR.glob(f"* [{video_id}].*")
+            p for p in download_dir.glob(f"* [{video_id}].*")
             if p.is_file()
         ]
         if candidates:
             def ext_rank(path):
-                ext = path.suffix.lower()
-                try:
-                    return preferred_exts.index(ext)
-                except ValueError:
-                    return len(preferred_exts)
+                return _audio_ext_rank(path.suffix, preferred_exts)
 
             candidates.sort(key=ext_rank)
             return candidates[0].name
@@ -437,14 +450,13 @@ def _resolve_playable_filename(requested_filename: str):
     return None
 
 
-def _ensure_browser_compatible_audio(filename: str):
-    """
-    Ensure returned file is broadly browser-compatible.
+def _convert_audio_to_m4a(filename: str):
+    """Convert an audio file variant to .m4a for broad browser playback support."""
+    path = get_download_dir() / filename
+    if not path.exists() or not path.is_file():
+        return filename
 
-    Converts lone `.webm` files to `.m4a` on demand when possible.
-    """
-    path = config.DOWNLOAD_DIR / filename
-    if not path.exists() or path.suffix.lower() != '.webm':
+    if path.suffix.lower() == '.m4a':
         return filename
 
     target = path.with_suffix('.m4a')
@@ -457,6 +469,9 @@ def _ensure_browser_compatible_audio(filename: str):
     if not shutil.which('ffmpeg'):
         return filename
 
+    _, default_quality = get_default_download_preferences()
+    target_bitrate = f'{default_quality}k'
+
     cmd = [
         'ffmpeg',
         '-y',
@@ -465,8 +480,7 @@ def _ensure_browser_compatible_audio(filename: str):
         '-vn',
         '-c:a',
         'aac',
-        '-b:a',
-        '192k',
+        '-b:a', target_bitrate,
         str(target),
     ]
     subprocess.run(
@@ -475,14 +489,28 @@ def _ensure_browser_compatible_audio(filename: str):
         stderr=subprocess.DEVNULL,
         check=False,
     )
+
     if target.exists() and target.stat().st_size > 0:
-        try:
-            path.unlink()
-        except Exception:
-            pass
         return target.name
 
     return filename
+
+
+def _ensure_browser_compatible_audio(filename: str):
+    """
+    Ensure returned file is broadly browser-compatible.
+
+    Converts non-browser-safe variants to `.m4a` on demand when possible.
+    """
+    path = get_download_dir() / filename
+    if not path.exists() or not path.is_file():
+        return filename
+
+    ext = path.suffix.lower()
+    if ext in BROWSER_SAFE_AUDIO_EXTS:
+        return filename
+
+    return _convert_audio_to_m4a(filename)
 
 
 
@@ -492,13 +520,13 @@ def _ensure_browser_compatible_audio(filename: str):
 @bp.route('/downloads/<filename>')
 def serve_download(filename):
     """Serve downloaded files for download."""
-    return send_from_directory(str(config.DOWNLOAD_DIR), filename, as_attachment=True)
+    return send_from_directory(str(get_download_dir()), filename, as_attachment=True)
 
 
 @bp.route('/api/thumbnails/<filename>')
 def serve_thumbnail(filename):
     """Serve downloaded thumbnails."""
-    return send_from_directory(str(config.THUMBNAILS_DIR), filename)
+    return send_from_directory(str(get_thumbnails_dir()), filename)
 
 
 @bp.route('/play/<filename>')
@@ -510,7 +538,8 @@ def play_audio(filename):
 
     resolved_filename = _ensure_browser_compatible_audio(resolved_filename)
 
-    filepath = config.DOWNLOAD_DIR / resolved_filename
+    download_dir = get_download_dir()
+    filepath = download_dir / resolved_filename
     if not filepath.exists():
         return jsonify({'error': 'File not found'}), 404
     
@@ -528,7 +557,7 @@ def play_audio(filename):
     }
     mime_type = mime_types.get(ext, 'audio/mpeg')
     
-    return send_from_directory(str(config.DOWNLOAD_DIR), resolved_filename, mimetype=mime_type)
+    return send_from_directory(str(download_dir), resolved_filename, mimetype=mime_type)
 
 
 @bp.route('/api/playlist-download/start', methods=['POST'])
@@ -663,7 +692,9 @@ def _background_playlist_download(session_id):
                     )
             
             downloader = YTMusicDownloader(
-                output_dir=str(config.DOWNLOAD_DIR),
+                output_dir=str(get_download_dir()),
+                audio_format=default_format,
+                quality=default_quality,
                 on_progress=progress_callback
             )
             

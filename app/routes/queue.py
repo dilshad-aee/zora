@@ -5,6 +5,7 @@ Queue Routes - Add, list, remove, clear queue items.
 from flask import Blueprint, jsonify, request
 from app.services.queue_service import queue_service
 from app.models import Download
+from app.download_preferences import get_default_download_preferences
 
 bp = Blueprint('queue', __name__)
 
@@ -16,8 +17,9 @@ def add_to_queue():
     url = data.get('url', '').strip()
     title = data.get('title', 'Unknown')
     thumbnail = data.get('thumbnail', '')
-    audio_format = data.get('format', 'm4a')
-    quality = data.get('quality', '320')
+    default_format, default_quality = get_default_download_preferences()
+    audio_format = str(data.get('format') or default_format).lower().lstrip('.')
+    quality = str(data.get('quality') or default_quality).strip()
     video_id = data.get('video_id', '')
     artist = data.get('artist', '')
     try:

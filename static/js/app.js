@@ -2201,6 +2201,11 @@ async function loadSettings() {
             if (settingsQuality) settingsQuality.value = settings.default_quality;
         }
 
+        const settingsDownloadDir = document.getElementById('settingsDownloadDir');
+        if (settingsDownloadDir) {
+            settingsDownloadDir.value = settings.download_dir || '';
+        }
+
         const dupCheck = document.getElementById('settingsDuplicates');
         if (dupCheck) dupCheck.checked = settings.check_duplicates !== false;
 
@@ -2216,9 +2221,15 @@ async function saveSettings(e) {
         await API.saveSettings({
             default_format: document.getElementById('settingsFormat').value,
             default_quality: document.getElementById('settingsQuality').value,
+            download_dir: document.getElementById('settingsDownloadDir')?.value?.trim() || '',
             check_duplicates: true,
             skip_duplicates: true
         });
+
+        await loadHistory();
+        if (State.playlists.selectedId) {
+            await loadSelectedPlaylistSongs();
+        }
 
         closeSettings();
         UI.toast('Settings saved', 'success');

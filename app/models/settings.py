@@ -21,6 +21,7 @@ class Settings(db.Model):
         'check_duplicates': 'true',
         'skip_duplicates': 'true',
         'theme': 'dark',
+        'download_dir': '',
     }
     
     @classmethod
@@ -60,6 +61,8 @@ class Settings(db.Model):
             settings['skip_duplicates'] = True
         else:
             settings['skip_duplicates'] = False
+
+        settings['download_dir'] = str(settings.get('download_dir') or '').strip()
         
         return settings
     

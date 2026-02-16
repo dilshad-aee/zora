@@ -6,7 +6,8 @@ import os
 import threading
 import uuid
 from datetime import datetime, timedelta
-from config import config
+from app.storage_paths import get_download_dir
+from app.download_preferences import get_default_download_preferences
 
 
 class QueueService:
@@ -80,13 +81,17 @@ class QueueService:
         url: str,
         title: str,
         thumbnail: str = '',
-        audio_format: str = 'm4a',
-        quality: str = '320',
+        audio_format: str = '',
+        quality: str = '',
         video_id: str = '',
         artist: str = '',
         duration: int = 0,
     ) -> dict:
         """Add item to queue."""
+        default_format, default_quality = get_default_download_preferences()
+        resolved_format = str(audio_format or default_format).lower().lstrip('.')
+        resolved_quality = str(quality or default_quality).strip()
+
         item = {
             'id': str(uuid.uuid4())[:8],
             'url': url,
@@ -95,8 +100,8 @@ class QueueService:
             'video_id': video_id,
             'artist': artist,
             'duration': duration,
-            'format': audio_format.upper(),
-            'quality': f'{quality}kbps',
+            'format': resolved_format.upper(),
+            'quality': f'{resolved_quality}kbps',
             'status': 'queued',
             'added_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
@@ -167,7 +172,7 @@ class QueueService:
             'is_playlist': is_playlist(url),
             'format': audio_format.upper(),
             'quality': f'{quality}kbps',
-            'output_dir': str(config.DOWNLOAD_DIR),
+            'output_dir': str(get_download_dir()),
             'started_at': None,
             'completed_at': None,
         })
@@ -221,7 +226,7 @@ class QueueService:
                         'thumbnail': item['thumbnail'],
                         'format': item['format'],
                         'quality': item['quality'],
-                        'output_dir': str(config.DOWNLOAD_DIR),
+                        'output_dir': str(get_download_dir()),
                         'existing_file': existing_file,
                         'completed_at': self._now_str(),
                     })
@@ -245,11 +250,11 @@ class QueueService:
                     'duration': item.get('duration'),
                     'format': item['format'],
                     'quality': item['quality'],
-                    'output_dir': str(config.DOWNLOAD_DIR),
+                    'output_dir': str(get_download_dir()),
                 })
                 
                 downloader = YTMusicDownloader(
-                    output_dir=str(config.DOWNLOAD_DIR),
+                    output_dir=str(get_download_dir()),
                     audio_format=item['format'].lower(),
                     quality=item['quality'].replace('kbps', ''),
                     quiet=True
@@ -282,7 +287,7 @@ class QueueService:
                         if not is_duplicate:
                             file_size = 0
                             if result_filename:
-                                file_path = config.DOWNLOAD_DIR / result_filename
+                                file_path = get_download_dir() / result_filename
                                 if file_path.exists():
                                     file_size = file_path.stat().st_size
 
