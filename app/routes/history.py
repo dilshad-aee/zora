@@ -7,6 +7,9 @@ import re
 from datetime import datetime
 
 from flask import Blueprint, jsonify
+from flask_login import login_required
+
+from app.auth.decorators import admin_required
 from app.models import Download, PlaylistSong, db
 from app.storage_paths import get_download_dir, get_thumbnails_dir
 from app.download_preferences import get_preferred_audio_exts, get_default_quality_label
@@ -252,6 +255,7 @@ def _dedupe_library_rows(downloads: list) -> bool:
 
 
 @bp.route('/history', methods=['GET'])
+@login_required
 def get_history():
     """Get download history and auto-repair stale filenames."""
     try:
@@ -330,18 +334,27 @@ def get_history():
 
 
 @bp.route('/history/clear', methods=['POST'])
+@admin_required
 def clear_history():
     """Clear download history."""
+    from app.models.audit_log import log_action
+    log_action('HISTORY_CLEAR', target_type='history')
+
     Download.clear_all()
     return jsonify({'success': True})
 
 
 @bp.route('/history/delete/<int:download_id>', methods=['POST'])
+@admin_required
 def delete_download(download_id):
     """Delete a download from database and filesystem."""
     download = Download.query.get(download_id)
     if not download:
         return jsonify({'error': 'Download not found'}), 404
+
+    from app.models.audit_log import log_action
+    log_action('SONG_DELETE', target_type='download', target_id=download_id,
+               metadata={'title': download.title, 'filename': download.filename})
     
     # Delete file from filesystem
     if download.filename:

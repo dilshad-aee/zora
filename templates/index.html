@@ -3,17 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="theme-color" content="#1a1a2e">
+
+    <!-- PWA / Theme -->
+    <meta name="theme-color" content="#6C5CE7">
+    <meta name="background-color" content="#1a1a2e">
+    <meta name="description" content="Zora - Download and play music from YouTube. Your personal music library.">
+    <meta name="application-name" content="Zora">
+
+    <!-- Apple / iOS PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Zora">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/icons/icon-192x192.png') }}">
+    <link rel="apple-touch-icon" sizes="152x152" href="{{ url_for('static', filename='images/icons/icon-152x152.png') }}">
+    <link rel="apple-touch-icon" sizes="144x144" href="{{ url_for('static', filename='images/icons/icon-144x144.png') }}">
+    <link rel="apple-touch-icon" sizes="128x128" href="{{ url_for('static', filename='images/icons/icon-128x128.png') }}">
+    <link rel="apple-touch-icon" sizes="96x96"  href="{{ url_for('static', filename='images/icons/icon-96x96.png') }}">
+    <link rel="apple-touch-icon" sizes="72x72"  href="{{ url_for('static', filename='images/icons/icon-72x72.png') }}">
+
+    <!-- Microsoft / Windows -->
+    <meta name="msapplication-TileColor" content="#6C5CE7">
+    <meta name="msapplication-TileImage" content="{{ url_for('static', filename='images/icons/icon-144x144.png') }}">
     <meta name="mobile-web-app-capable" content="yes">
-    <meta name="description" content="Zora - Download and play music from YouTube">
-    
-    <title>Zora - YouTube Music Downloader</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
-    <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo.png') }}">
+
+    <!-- PWA Manifest -->
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    
+    <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='images/icons/icon-192x192.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32"   href="{{ url_for('static', filename='logo.png') }}">
+
+    <title>Zora - YouTube Music Downloader</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
@@ -30,7 +49,7 @@
                 <img src="{{ url_for('static', filename='logo.png') }}" alt="Zora" class="mobile-header__logo">
                 <span>Zora</span>
             </div>
-            <button class="mobile-header__action" onclick="openSettings()">
+            <button class="mobile-header__action mobile-header__action--settings" data-role="admin" onclick="openSettings()">
                 <i class="fas fa-cog"></i>
             </button>
         </header>
@@ -46,11 +65,11 @@
             </div>
             
             <nav class="sidebar__nav">
-                <a class="nav-link active" data-view="download" onclick="showView('download'); closeSidebar();">
+                <a class="nav-link" data-view="download" data-role="admin" onclick="showView('download'); closeSidebar();">
                     <i class="fas fa-download"></i>
                     <span>Download</span>
                 </a>
-                <a class="nav-link" data-view="library" onclick="showView('library'); closeSidebar();">
+                <a class="nav-link active" data-view="library" onclick="showView('library'); closeSidebar();">
                     <i class="fas fa-music"></i>
                     <span>My Music</span>
                 </a>
@@ -58,25 +77,176 @@
                     <i class="fas fa-list-ul"></i>
                     <span>Playlists</span>
                 </a>
-                <a class="nav-link" data-view="playlist-downloads" onclick="showView('playlist-downloads'); closeSidebar();">
+                <a class="nav-link" data-view="playlist-downloads" data-role="admin" onclick="showView('playlist-downloads'); closeSidebar();">
                     <i class="fas fa-download"></i>
                     <span>Playlist Downloads</span>
+                </a>
+                <a class="nav-link" data-view="admin" data-role="admin" onclick="showView('admin'); closeSidebar();">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>Admin</span>
+                </a>
+                <a class="nav-link" data-view="profile" onclick="showView('profile'); closeSidebar();">
+                    <i class="fas fa-user-circle"></i>
+                    <span>Profile</span>
                 </a>
             </nav>
             
             <div class="sidebar__footer">
-                <button class="sidebar__btn" onclick="openSettings(); closeSidebar();">
+                <button class="sidebar__btn sidebar__btn--settings" data-role="admin" onclick="openSettings(); closeSidebar();">
                     <i class="fas fa-cog"></i>
                     <span>Settings</span>
                 </button>
+                <div id="sidebarUserInfo"></div>
             </div>
         </aside>
         
         <!-- Main Content -->
         <main class="main" id="mainContent">
+
+            <!-- LOGIN VIEW -->
+            <div class="view hidden" id="loginView">
+                <div class="auth-container">
+                    <div class="auth-card">
+                        <div class="auth-card__brand">
+                            <img src="{{ url_for('static', filename='logo.png') }}" alt="Zora" class="auth-card__logo">
+                            <h1>Welcome to Zora</h1>
+                            <p>Sign in to your account</p>
+                        </div>
+                        <form class="auth-form" onsubmit="handleLogin(event)">
+                            <div class="form-group">
+                                <label for="loginEmail">Email</label>
+                                <input type="email" id="loginEmail" class="form-input" placeholder="you@example.com" required autocomplete="email">
+                            </div>
+                            <div class="form-group">
+                                <label for="loginPassword">Password</label>
+                                <input type="password" id="loginPassword" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+                            </div>
+                            <button type="submit" class="btn btn--primary btn--full" id="loginBtn">
+                                <i class="fas fa-sign-in-alt"></i> Sign In
+                            </button>
+                        </form>
+                        <p class="auth-card__forgot">
+                            <a href="#" onclick="switchAuthTab('forgot-password'); return false;">Forgot password?</a>
+                        </p>
+                        <div class="auth-divider"><span>or</span></div>
+                        <a href="/api/auth/google/start" class="btn btn--google btn--full">
+                            <svg class="google-icon" viewBox="0 0 24 24" width="18" height="18">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                            </svg>
+                            Continue with Google
+                        </a>
+                        <p class="auth-card__switch">
+                            Don't have an account? <a href="#" onclick="switchAuthTab('signup'); return false;">Create one</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SIGNUP VIEW -->
+            <div class="view hidden" id="signupView">
+                <div class="auth-container">
+                    <div class="auth-card">
+                        <div class="auth-card__brand">
+                            <img src="{{ url_for('static', filename='logo.png') }}" alt="Zora" class="auth-card__logo">
+                            <h1>Create Account</h1>
+                            <p>Join Zora to start listening</p>
+                        </div>
+                        <form class="auth-form" onsubmit="handleSignup(event)">
+                            <div class="form-group">
+                                <label for="signupName">Name</label>
+                                <input type="text" id="signupName" class="form-input" placeholder="Your name" required autocomplete="name">
+                            </div>
+                            <div class="form-group">
+                                <label for="signupEmail">Email</label>
+                                <input type="email" id="signupEmail" class="form-input" placeholder="you@example.com" required autocomplete="email">
+                            </div>
+                            <div class="form-group">
+                                <label for="signupPassword">Password</label>
+                                <input type="password" id="signupPassword" class="form-input" placeholder="Min 8 characters" required autocomplete="new-password" minlength="8">
+                            </div>
+                            <div class="form-group">
+                                <label for="signupConfirmPassword">Confirm Password</label>
+                                <input type="password" id="signupConfirmPassword" class="form-input" placeholder="••••••••" required autocomplete="new-password">
+                            </div>
+                            <button type="submit" class="btn btn--primary btn--full" id="signupBtn">
+                                <i class="fas fa-user-plus"></i> Create Account
+                            </button>
+                        </form>
+                        <div class="auth-divider"><span>or</span></div>
+                        <a href="/api/auth/google/start" class="btn btn--google btn--full">
+                            <svg class="google-icon" viewBox="0 0 24 24" width="18" height="18">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                            </svg>
+                            Continue with Google
+                        </a>
+                        <p class="auth-card__switch">
+                            Already have an account? <a href="#" onclick="switchAuthTab('login'); return false;">Sign in</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <!-- FORGOT PASSWORD VIEW -->
+            <div class="view hidden" id="forgotPasswordView">
+                <div class="auth-container">
+                    <div class="auth-card">
+                        <div class="auth-card__brand">
+                            <img src="{{ url_for('static', filename='logo.png') }}" alt="Zora" class="auth-card__logo">
+                            <h1>Reset Password</h1>
+                            <p>Enter your email to receive a reset link</p>
+                        </div>
+                        <form class="auth-form" onsubmit="handleForgotPassword(event)">
+                            <div class="form-group">
+                                <label for="forgotEmail">Email</label>
+                                <input type="email" id="forgotEmail" class="form-input" placeholder="you@example.com" required autocomplete="email">
+                            </div>
+                            <button type="submit" class="btn btn--primary btn--full" id="forgotPasswordBtn">
+                                <i class="fas fa-paper-plane"></i> Send Reset Link
+                            </button>
+                        </form>
+                        <p class="auth-card__switch">
+                            Remember your password? <a href="#" onclick="switchAuthTab('login'); return false;">Sign in</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESET PASSWORD VIEW -->
+            <div class="view hidden" id="resetPasswordView">
+                <div class="auth-container">
+                    <div class="auth-card">
+                        <div class="auth-card__brand">
+                            <img src="{{ url_for('static', filename='logo.png') }}" alt="Zora" class="auth-card__logo">
+                            <h1>Set New Password</h1>
+                            <p>Choose a strong new password</p>
+                        </div>
+                        <form class="auth-form" onsubmit="handleResetPassword(event)">
+                            <div class="form-group">
+                                <label for="resetNewPassword">New Password</label>
+                                <input type="password" id="resetNewPassword" class="form-input" placeholder="Min 8 characters" required autocomplete="new-password" minlength="8">
+                            </div>
+                            <div class="form-group">
+                                <label for="resetConfirmPassword">Confirm Password</label>
+                                <input type="password" id="resetConfirmPassword" class="form-input" placeholder="••••••••" required autocomplete="new-password">
+                            </div>
+                            <button type="submit" class="btn btn--primary btn--full" id="resetPasswordBtn">
+                                <i class="fas fa-key"></i> Reset Password
+                            </button>
+                        </form>
+                        <p class="auth-card__switch">
+                            <a href="#" onclick="switchAuthTab('login'); return false;">Back to sign in</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
             
             <!-- DOWNLOAD VIEW -->
-            <div class="view" id="downloadView">
+            <div class="view hidden" id="downloadView">
                 <div class="hero">
                     <h1 class="hero__title">
                         <img src="{{ url_for('static', filename='logo.png') }}" alt="" class="hero__logo">
@@ -300,135 +470,101 @@
             <!-- PLAYLISTS VIEW -->
             <div class="view hidden" id="playlistsView">
                 <h1 class="page-title">
-                    <i class="fas fa-list-music"></i> My Playlists
+                    <i class="fas fa-compact-disc"></i> Playlists
                 </h1>
-                <p class="page-subtitle">Create curated collections, then play, shuffle, or loop with full control.</p>
+                <p class="page-subtitle">Discover public playlists or manage your own collections.</p>
 
-                <div class="playlist-workspace-switch" role="tablist" aria-label="Playlist workspace">
-                    <button type="button"
-                            class="playlist-workspace-switch__btn active"
-                            id="playlistWorkspaceLibraryBtn"
-                            onclick="switchPlaylistWorkspace('library')">
-                        <i class="fas fa-layer-group"></i>
-                        <span>Browse Playlists</span>
+                <!-- Tab Bar -->
+                <div class="playlist-tabs" role="tablist">
+                    <button type="button" class="playlist-tab active" data-tab="explore"
+                            onclick="switchPlaylistTab('explore')">
+                        <i class="fas fa-compass"></i>
+                        <span>Explore</span>
                     </button>
-                    <button type="button"
-                            class="playlist-workspace-switch__btn"
-                            id="playlistWorkspaceViewerBtn"
-                            onclick="switchPlaylistWorkspace('viewer')">
-                        <i class="fas fa-list-check"></i>
-                        <span>Playlist Details</span>
+                    <button type="button" class="playlist-tab" data-tab="mine"
+                            onclick="switchPlaylistTab('mine')">
+                        <i class="fas fa-folder-open"></i>
+                        <span>My Playlists</span>
                     </button>
                 </div>
 
-                <div class="playlists-layout">
-                    <div class="playlists-panel playlists-panel--library" id="playlistsBrowsePanel">
-                        <div class="playlists-panel__section-title">
-                            <i class="fas fa-layer-group"></i>
-                            <span>Playlist Library</span>
-                        </div>
-                        <p class="text-muted playlists-panel__section-subtitle">
-                            Select a playlist to open and manage songs.
-                        </p>
-
-                        <div class="playlist-library-search">
-                            <i class="fas fa-search"></i>
-                            <input type="text"
-                                   id="playlistListSearch"
-                                   class="form-input form-input--square"
-                                   placeholder="Search playlists..."
-                                   autocomplete="off"
-                                   oninput="filterPlaylistsList(this.value)">
-                        </div>
-
-                        <div class="playlists-create">
-                            <input type="text"
-                                   id="newPlaylistName"
-                                   class="form-input"
-                                   placeholder="Create a playlist..."
-                                   maxlength="120"
-                                   onkeypress="if (event.key === 'Enter') createPlaylist()">
-                            <button class="btn btn--primary btn--small" onclick="createPlaylist()">
-                                <i class="fas fa-plus"></i>
-                                <span>Create</span>
-                            </button>
-                        </div>
-
-                        <div id="playlistsList" class="playlists-list">
-                            <div class="empty-state">
-                                <i class="fas fa-list-music"></i>
-                                <h3>No playlists yet</h3>
-                                <p>Create a playlist to organize your downloaded songs</p>
-                            </div>
-                        </div>
+                <!-- ===== EXPLORE TAB ===== -->
+                <div class="playlist-tab-content" id="playlistTabExplore">
+                    <!-- Category Filter Bar -->
+                    <div class="category-filter-bar" id="categoryFilterBar">
+                        <button class="category-pill active" data-category="" onclick="filterByCategory(null)">
+                            <i class="fas fa-globe"></i> All
+                        </button>
+                        <!-- Dynamic category pills inserted here -->
                     </div>
 
-                    <div class="playlists-panel playlists-panel--songs playlists-panel--hidden" id="playlistsSongsPanel">
-                        <div class="playlists-panel__section-title">
-                            <i class="fas fa-compact-disc"></i>
-                            <span>Playlist Studio</span>
-                        </div>
-                        <p class="text-muted playlists-panel__section-subtitle">
-                            Play, reorder your focus, and curate songs in one workspace.
-                        </p>
+                    <!-- Sort Controls -->
+                    <div class="explore-controls">
+                        <select id="exploreSortSelect" class="explore-sort" onchange="loadExplorePlaylists()">
+                            <option value="recent">Newest</option>
+                            <option value="popular">Most Liked</option>
+                        </select>
+                    </div>
 
-                        <div class="playlists-panel__header">
-                            <h2 id="selectedPlaylistName">Select a playlist</h2>
-                            <div class="playlists-panel__header-actions">
-                                <button class="btn btn--secondary btn--small"
-                                        id="playlistBackToBrowseBtn"
-                                        style="display: none;"
-                                        onclick="switchPlaylistWorkspace('library')">
-                                    <i class="fas fa-arrow-left"></i>
-                                    <span class="btn-text">Browse</span>
-                                </button>
-                                <button class="btn btn--secondary btn--small"
-                                        id="addSongsToPlaylistBtn"
-                                        style="display: none;"
-                                        onclick="openAddSongsToSelectedPlaylistModal()">
-                                    <i class="fas fa-plus"></i>
-                                    <span class="btn-text">Add To This Playlist</span>
-                                </button>
-                                <button class="btn btn--danger btn--small"
-                                        id="deletePlaylistBtn"
-                                        style="display: none;"
-                                        onclick="deleteSelectedPlaylist()">
-                                    <i class="fas fa-trash"></i>
-                                    <span class="btn-text">Delete</span>
-                                </button>
-                            </div>
+                    <!-- Explore Grid -->
+                    <div class="playlist-grid" id="exploreGrid">
+                        <div class="empty-state">
+                            <i class="fas fa-compass"></i>
+                            <h3>No public playlists yet</h3>
+                            <p>Be the first to create a public playlist!</p>
                         </div>
-                        <p class="text-muted" id="selectedPlaylistMeta">Choose a playlist to see songs</p>
-                        <div class="playlist-playback-controls">
-                            <button class="btn btn--primary btn--small"
-                                    id="playlistPlayAllBtn"
-                                    onclick="playSelectedPlaylist(false)"
-                                    disabled>
-                                <i class="fas fa-play"></i>
-                                <span>Play All</span>
-                            </button>
-                            <button class="btn btn--secondary btn--small"
-                                    id="playlistShuffleBtn"
-                                    onclick="playSelectedPlaylist(true)"
-                                    disabled>
-                                <i class="fas fa-random"></i>
-                                <span>Shuffle</span>
-                            </button>
-                            <button class="btn btn--secondary btn--small playlist-loop-btn"
-                                    id="playlistLoopBtn"
-                                    onclick="togglePlaylistLoop()"
-                                    disabled>
-                                <i class="fas fa-repeat"></i>
-                                <span>Loop: Off</span>
-                            </button>
-                        </div>
+                    </div>
+                    <div class="explore-pagination" id="explorePagination"></div>
+                </div>
 
-                        <div id="playlistSongsList" class="playlist-songs-list">
-                            <div class="empty-state">
-                                <i class="fas fa-music"></i>
-                                <h3>No playlist selected</h3>
-                                <p>Pick a playlist from the left panel</p>
-                            </div>
+                <!-- ===== MY PLAYLISTS TAB ===== -->
+                <div class="playlist-tab-content hidden" id="playlistTabMine">
+                    <div class="my-playlists-header">
+                        <button class="btn btn--primary btn--small" onclick="openCreatePlaylistModal()">
+                            <i class="fas fa-plus"></i>
+                            <span>New Playlist</span>
+                        </button>
+                    </div>
+
+                    <div class="playlist-grid" id="myPlaylistsGrid">
+                        <div class="empty-state">
+                            <i class="fas fa-folder-open"></i>
+                            <h3>No playlists yet</h3>
+                            <p>Create a playlist to organize your downloads</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== PLAYLIST DETAIL VIEW ===== -->
+                <div class="playlist-tab-content hidden" id="playlistTabDetail">
+                    <button class="playlist-detail-back" onclick="goBackFromPlaylistDetail()">
+                        <i class="fas fa-arrow-left"></i> Back
+                    </button>
+
+                    <div class="playlist-detail-header" id="playlistDetailHeader">
+                        <!-- Dynamic: cover, title, owner, stats, actions -->
+                    </div>
+
+                    <div class="playlist-playback-controls" id="playlistDetailPlaybackControls">
+                        <button class="btn btn--primary btn--small" id="playlistPlayAllBtn"
+                                onclick="playSelectedPlaylist(false)" disabled>
+                            <i class="fas fa-play"></i> <span>Play All</span>
+                        </button>
+                        <button class="btn btn--secondary btn--small" id="playlistShuffleBtn"
+                                onclick="playSelectedPlaylist(true)" disabled>
+                            <i class="fas fa-random"></i> <span>Shuffle</span>
+                        </button>
+                        <button class="btn btn--secondary btn--small playlist-loop-btn" id="playlistLoopBtn"
+                                onclick="togglePlaylistLoop()" disabled>
+                            <i class="fas fa-repeat"></i> <span>Loop: Off</span>
+                        </button>
+                    </div>
+
+                    <div id="playlistSongsList" class="playlist-songs-list">
+                        <div class="empty-state">
+                            <i class="fas fa-music"></i>
+                            <h3>No songs in this playlist</h3>
+                            <p>Add songs from your library</p>
                         </div>
                     </div>
                 </div>
@@ -465,6 +601,172 @@
                     <!-- Song List -->
                     <div class="playlist-download-list" id="playlistDownloadList">
                         <!-- Songs will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- PROFILE VIEW -->
+            <div class="view hidden" id="profileView">
+                <div class="view-header">
+                    <h1 class="view-header__title"><i class="fas fa-user-circle"></i> My Profile</h1>
+                </div>
+                <div class="profile-container">
+                    <div class="profile-card">
+                        <div class="profile-card__avatar" id="profileAvatar"></div>
+                        <div class="profile-card__info">
+                            <div class="profile-field">
+                                <label class="profile-field__label">Name</label>
+                                <div class="profile-field__edit">
+                                    <input type="text" id="profileNameInput" class="form-input" maxlength="100">
+                                    <button class="btn btn--primary btn--sm" id="profileSaveNameBtn" onclick="handleSaveProfileName()">
+                                        <i class="fas fa-check"></i> Save
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="profile-field">
+                                <label class="profile-field__label">Email</label>
+                                <p class="profile-field__value" id="profileEmail"></p>
+                            </div>
+                            <div class="profile-field">
+                                <label class="profile-field__label">Role</label>
+                                <p class="profile-field__value"><span class="profile-badge" id="profileRole"></span></p>
+                            </div>
+                            <div class="profile-field">
+                                <label class="profile-field__label">Auth Provider</label>
+                                <p class="profile-field__value" id="profileAuthProvider"></p>
+                            </div>
+                            <div class="profile-field">
+                                <label class="profile-field__label">Member Since</label>
+                                <p class="profile-field__value" id="profileCreatedAt"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="profile-card" id="profilePasswordSection">
+                        <h3 class="profile-card__title"><i class="fas fa-lock"></i> Change Password</h3>
+                        <form class="auth-form" onsubmit="handleProfilePasswordChange(event)">
+                            <div class="form-group">
+                                <label for="profileCurrentPassword">Current Password</label>
+                                <input type="password" id="profileCurrentPassword" class="form-input" placeholder="••••••••" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="profileNewPassword">New Password</label>
+                                <input type="password" id="profileNewPassword" class="form-input" placeholder="Min 8 characters" required minlength="8">
+                            </div>
+                            <button type="submit" class="btn btn--primary" id="profileChangePasswordBtn">
+                                <i class="fas fa-key"></i> Change Password
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ADMIN VIEW -->
+            <div class="view hidden" id="adminView">
+                <h1 class="page-title">
+                    <i class="fas fa-shield-alt"></i> Admin Panel
+                </h1>
+
+                <div class="admin-tabs">
+                    <button class="admin-tab active" data-tab="users" onclick="switchAdminTab('users')">
+                        <i class="fas fa-users"></i> Users
+                    </button>
+                    <button class="admin-tab" data-tab="categories" onclick="switchAdminTab('categories')">
+                        <i class="fas fa-tags"></i> Categories
+                    </button>
+                    <button class="admin-tab" data-tab="audit" onclick="switchAdminTab('audit')">
+                        <i class="fas fa-clipboard-list"></i> Audit Logs
+                    </button>
+                </div>
+
+                <!-- Users Tab -->
+                <div class="admin-panel" id="adminUsersPanel">
+                    <div class="admin-toolbar">
+                        <div class="admin-search">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="adminUserSearch" class="form-input" placeholder="Search users..." oninput="debounceAdminUserSearch()">
+                        </div>
+                    </div>
+                    <div class="admin-table-wrap">
+                        <table class="admin-table" id="adminUsersTable">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Last Login</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminUsersBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="admin-pagination" id="adminUsersPagination"></div>
+                </div>
+
+                <!-- Audit Logs Tab -->
+                <div class="admin-panel hidden" id="adminAuditPanel">
+                    <div class="admin-toolbar">
+                        <div class="admin-search">
+                            <i class="fas fa-filter"></i>
+                            <select id="adminAuditFilter" class="form-input" onchange="loadAuditLogs(1)">
+                                <option value="">All Actions</option>
+                                <option value="DOWNLOAD_CREATE">Download Create</option>
+                                <option value="SETTINGS_UPDATE">Settings Update</option>
+                                <option value="HISTORY_CLEAR">History Clear</option>
+                                <option value="SONG_DELETE">Song Delete</option>
+                                <option value="USER_ROLE_CHANGE">Role Change</option>
+                                <option value="USER_DEACTIVATE">User Deactivate</option>
+                                <option value="USER_ACTIVATE">User Activate</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="admin-table-wrap">
+                        <table class="admin-table" id="adminAuditTable">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Actor</th>
+                                    <th>Action</th>
+                                    <th>Target</th>
+                                    <th>Details</th>
+                                    <th>IP</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminAuditBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="admin-pagination" id="adminAuditPagination"></div>
+                </div>
+
+                <!-- Categories Tab -->
+                <div class="admin-panel hidden" id="adminCategoriesPanel">
+                    <div class="admin-toolbar">
+                        <h3>Playlist Categories</h3>
+                        <button class="btn btn--primary btn--small" onclick="openCreateCategoryForm()">
+                            <i class="fas fa-plus"></i> Add Category
+                        </button>
+                    </div>
+                    <div class="category-create-form hidden" id="categoryCreateForm">
+                        <div class="form-row">
+                            <input type="text" id="newCategoryName" class="form-input" placeholder="Category name" maxlength="60">
+                            <input type="text" id="newCategoryIcon" class="form-input" placeholder="fa-music" value="fa-music" maxlength="30">
+                            <input type="color" id="newCategoryColor" value="#6C5CE7" class="form-input form-input--color">
+                            <button class="btn btn--primary btn--small" onclick="createCategory()">
+                                <i class="fas fa-check"></i>
+                            </button>
+                            <button class="btn btn--secondary btn--small" onclick="closeCategoryForm()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="adminCategoriesList" class="admin-categories-list">
+                        <div class="empty-state">
+                            <i class="fas fa-tags"></i>
+                            <h3>No categories</h3>
+                            <p>Create categories for users to organize playlists</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -553,17 +855,17 @@
         
         <!-- Mobile Bottom Navigation -->
         <nav class="mobile-nav" id="mobileNav">
-            <a class="mobile-nav__item active" onclick="showView('download')">
+            <a class="mobile-nav__item" data-role="admin" onclick="showView('download')">
                 <i class="fas fa-download"></i>
                 <span>Download</span>
             </a>
-            <a class="mobile-nav__item" onclick="showView('library')">
+            <a class="mobile-nav__item active" onclick="showView('library')">
                 <i class="fas fa-music"></i>
                 <span>Library</span>
             </a>
-            <a class="mobile-nav__item" onclick="showView('playlist-downloads')">
-                <i class="fas fa-list-check"></i>
-                <span>Progress</span>
+            <a class="mobile-nav__item" onclick="showView('playlists')">
+                <i class="fas fa-list-ul"></i>
+                <span>Playlists</span>
             </a>
         </nav>
     </div>
@@ -847,6 +1149,12 @@
     <script src="{{ url_for('static', filename='js/api.js') }}"></script>
     <script src="{{ url_for('static', filename='js/player.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/downloads.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/playlists.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/library.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/playback.js') }}"></script>
     <!-- Initialize Player -->
     <script>
         window.addEventListener('load', () => {

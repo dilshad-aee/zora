@@ -3,11 +3,16 @@ __pycache__/
 .env
 venv/
 downloads/
+thumbnails/
+*.db
 data.db
+zora.db
 .DS_Store
 .pytest_cache/
 *.egg-info/
 dist/
 build/
 history.json
-
+node_modules/
+playwright-report/
+test-results/

@@ -3,6 +3,8 @@ Settings Routes - Get and update user settings.
 """
 
 from flask import Blueprint, jsonify, request
+
+from app.auth.decorators import admin_required
 from app.models import Settings
 from app.storage_paths import get_download_dir
 
@@ -10,6 +12,7 @@ bp = Blueprint('settings', __name__)
 
 
 @bp.route('/settings', methods=['GET'])
+@admin_required
 def get_settings():
     """Get current settings."""
     settings = Settings.get_all()
@@ -18,6 +21,7 @@ def get_settings():
 
 
 @bp.route('/settings', methods=['POST'])
+@admin_required
 def update_settings():
     """Update settings."""
     data = request.get_json(silent=True) or {}
@@ -36,4 +40,8 @@ def update_settings():
 
     updated = Settings.update_all(settings_data) if settings_data else Settings.get_all()
     updated['download_dir'] = str(get_download_dir())
+
+    from app.models.audit_log import log_action
+    log_action('SETTINGS_UPDATE', target_type='settings', metadata=settings_data)
+
     return jsonify(updated)

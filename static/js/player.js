@@ -13,6 +13,10 @@ const Player = {
     isReady: false,
     isInitialized: false,
 
+    // Playback resume
+    _lastSavedPosition: 0,
+    _playbackSaveTimer: null,
+
     // Playback modes
     shuffle: false,
     repeat: 'off', // 'off', 'all', 'one'
@@ -76,6 +80,12 @@ const Player = {
         this.audio.addEventListener('timeupdate', () => {
             this.updateProgress();
             this.updateNowPlayingProgress();
+            this.maybeSavePlaybackState();
+        });
+
+        // Save state on pause (user pauses or tabs away)
+        this.audio.addEventListener('pause', () => {
+            this.savePlaybackStateNow();
         });
 
         this.audio.addEventListener('loadedmetadata', () => {
@@ -100,6 +110,11 @@ const Player = {
         // Error handling
         this.audio.addEventListener('error', (e) => {
             this.onError(e);
+        });
+
+        // Save playback state before page unload
+        window.addEventListener('beforeunload', () => {
+            this.savePlaybackStateNow();
         });
 
         // Mark as initialized
@@ -276,7 +291,7 @@ const Player = {
             const playerBar = document.getElementById('playerBar');
             if (playerBar) playerBar.style.display = 'block';
         }
-        
+
         // Adjust main content padding after player shows
         if (typeof adjustMainPadding === 'function') {
             setTimeout(adjustMainPadding, 100);
@@ -765,6 +780,90 @@ const Player = {
     },
 
     /**
+     * Debounced save: saves playback state every 10+ seconds of playback progress.
+     * Called on every timeupdate event.
+     */
+    maybeSavePlaybackState() {
+        if (!this.audio || !this.currentTrack) return;
+
+        const pos = this.audio.currentTime || 0;
+        // Only save if position changed by at least 10 seconds
+        if (Math.abs(pos - this._lastSavedPosition) < 10) return;
+        this._lastSavedPosition = pos;
+
+        this._queuePlaybackStateSave();
+    },
+
+    /**
+     * Force-save playback state immediately (on pause, beforeunload).
+     */
+    savePlaybackStateNow() {
+        if (!this.currentTrack) return;
+
+        // Clear any pending debounce
+        if (this._playbackSaveTimer) {
+            clearTimeout(this._playbackSaveTimer);
+            this._playbackSaveTimer = null;
+        }
+
+        const pos = this.audio ? this.audio.currentTime || 0 : 0;
+        this._lastSavedPosition = pos;
+        this._doSavePlaybackState();
+    },
+
+    /**
+     * Debounce the save so we don't spam the server.
+     */
+    _queuePlaybackStateSave() {
+        if (this._playbackSaveTimer) return; // Already queued
+        this._playbackSaveTimer = setTimeout(() => {
+            this._playbackSaveTimer = null;
+            this._doSavePlaybackState();
+        }, 3000);
+    },
+
+    /**
+     * Actually save to localStorage + server.
+     */
+    _doSavePlaybackState() {
+        const track = this.currentTrack;
+        if (!track || !track.filename) return;
+
+        const pos = this.audio ? this.audio.currentTime || 0 : 0;
+        const state = {
+            filename: track.filename,
+            title: track.title || '',
+            artist: track.artist || '',
+            thumbnail: track.thumbnail || '',
+            position: String(Math.floor(pos))
+        };
+
+        // Save to localStorage (instant, works offline)
+        try {
+            localStorage.setItem('last_playback_state', JSON.stringify(state));
+        } catch (e) { /* quota exceeded, ignore */ }
+
+        // Sync to server (debounced via syncPreferencesToServer)
+        if (typeof syncPreferencesToServer === 'function') {
+            syncPreferencesToServer('last_track_filename', state.filename);
+            syncPreferencesToServer('last_track_title', state.title);
+            syncPreferencesToServer('last_track_artist', state.artist);
+            syncPreferencesToServer('last_track_thumbnail', state.thumbnail);
+            syncPreferencesToServer('last_track_position', state.position);
+        }
+    },
+
+    /**
+     * Clear saved playback state (call when queue ends).
+     */
+    clearPlaybackState() {
+        try {
+            localStorage.removeItem('last_playback_state');
+        } catch (e) { /* ignore */ }
+        this._lastSavedPosition = 0;
+    },
+
+    /**
      * Check if audio is playing
      * @returns {boolean} Playing state
      */
@@ -889,17 +988,17 @@ const Player = {
             e.preventDefault();
             this.skipForward(10);
         });
-    
-    // Track navigation buttons  
-    document.getElementById('btnPrevTrack')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.playPrevious();
-    });
-    
-    document.getElementById('btnNextTrack')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.playNext();
-    });
+
+        // Track navigation buttons  
+        document.getElementById('btnPrevTrack')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.playPrevious();
+        });
+
+        document.getElementById('btnNextTrack')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.playNext();
+        });
 
         // Mute button
         document.getElementById('btnMute')?.addEventListener('click', (e) => {
@@ -912,7 +1011,7 @@ const Player = {
         if (volumeSlider) {
             volumeSlider.addEventListener('input', (e) => {
                 this.setVolume(e.target.value / 100);
-            e.target.style.setProperty('--slider-percent', `${e.target.value}%`);
+                e.target.style.setProperty('--slider-percent', `${e.target.value}%`);
             });
         }
 
@@ -927,12 +1026,12 @@ const Player = {
             e.preventDefault();
             this.cycleRepeat();
         });
-    
-    // Sleep timer button
-    document.getElementById('btnSleepTimer')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.showSleepTimerMenu();
-    });
+
+        // Sleep timer button
+        document.getElementById('btnSleepTimer')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.showSleepTimerMenu();
+        });
 
         // Lyrics button
         document.getElementById('btnLyrics')?.addEventListener('click', (e) => {
@@ -967,16 +1066,16 @@ const Player = {
             e.preventDefault();
             this.skipForward(10);
         });
-    
-    document.getElementById('btnPrevTrackNP')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.playPrevious();
-    });
-    
-    document.getElementById('btnNextTrackNP')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        this.playNext();
-    });
+
+        document.getElementById('btnPrevTrackNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.playPrevious();
+        });
+
+        document.getElementById('btnNextTrackNP')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.playNext();
+        });
 
         document.getElementById('btnShuffleNP')?.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1013,7 +1112,7 @@ const Player = {
         if (npVolume) {
             npVolume.addEventListener('input', (e) => {
                 this.setVolume(e.target.value / 100);
-            e.target.style.setProperty('--slider-percent', `${e.target.value}%`);
+                e.target.style.setProperty('--slider-percent', `${e.target.value}%`);
             });
         }
 
@@ -1097,6 +1196,13 @@ const Player = {
             localStorage.setItem('player_repeat', this.repeat);
             const vol = this.audio ? this.audio.volume : 1;
             localStorage.setItem('player_volume', String(vol));
+
+            // Sync to server (debounced)
+            if (typeof syncPreferencesToServer === 'function') {
+                syncPreferencesToServer('player_shuffle', String(this.shuffle));
+                syncPreferencesToServer('player_repeat', this.repeat);
+                syncPreferencesToServer('player_volume', String(vol));
+            }
         } catch (e) {
             console.warn('Could not save player settings');
         }
@@ -1384,7 +1490,7 @@ const Player = {
             const mins = Math.floor(remainingMs / 60000);
             const secs = Math.floor((remainingMs % 60000) / 1000);
             const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-            
+
             if (display) display.textContent = `${remainingMin}m`;
             if (btn) btn.classList.add('active');
             if (btnNP) btnNP.classList.add('active');

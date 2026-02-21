@@ -3,6 +3,8 @@ Queue Routes - Add, list, remove, clear queue items.
 """
 
 from flask import Blueprint, jsonify, request
+
+from app.auth.decorators import admin_required
 from app.services.queue_service import queue_service
 from app.models import Download
 from app.download_preferences import get_default_download_preferences
@@ -11,6 +13,7 @@ bp = Blueprint('queue', __name__)
 
 
 @bp.route('/add', methods=['POST'])
+@admin_required
 def add_to_queue():
     """Add item to download queue."""
     data = request.get_json(silent=True) or {}
@@ -58,12 +61,14 @@ def add_to_queue():
 
 @bp.route('', methods=['GET'])
 @bp.route('/', methods=['GET'])
+@admin_required
 def get_queue():
     """Get queue status."""
     return jsonify(queue_service.get_all())
 
 
 @bp.route('/remove/<item_id>', methods=['POST'])
+@admin_required
 def remove_from_queue(item_id: str):
     """Remove item from queue."""
     if queue_service.remove(item_id):
@@ -72,6 +77,7 @@ def remove_from_queue(item_id: str):
 
 
 @bp.route('/clear', methods=['POST'])
+@admin_required
 def clear_queue():
     """Clear entire queue."""
     queue_service.clear()
