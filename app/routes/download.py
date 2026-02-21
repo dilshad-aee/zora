@@ -12,7 +12,7 @@ from flask_login import current_user
 from sqlalchemy import func
 
 from app.auth.decorators import admin_required
-from app.utils import is_valid_url
+from app.utils import is_valid_url, is_unsupported_dynamic_playlist
 from app.services.youtube import YouTubeService
 from app.services.queue_service import queue_service
 from app.storage_paths import get_download_dir
@@ -115,6 +115,14 @@ def start_download():
 
     if not is_valid_url(url):
         return jsonify({'error': 'Invalid YouTube URL'}), 400
+
+    if is_unsupported_dynamic_playlist(url):
+        return jsonify({
+            'error': (
+                'YouTube Mix/Radio playlists (list=RD...) are not supported. '
+                'Use a normal playlist URL (list=PL... or OLAK...).'
+            )
+        }), 400
 
     from app.models.audit_log import log_action
     log_action('DOWNLOAD_CREATE', target_type='download', metadata={'url': url, 'format': audio_format, 'quality': quality})

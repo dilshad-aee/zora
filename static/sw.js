@@ -74,9 +74,27 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // 3. API calls — Network-First, fall back to cache
+    // 3. API calls
     if (url.pathname.startsWith('/api/')) {
-        event.respondWith(networkFirst(request, API_CACHE, 4000));
+        // Never cache non-GET API calls and never apply short timeout to them.
+        // Large playlist extraction uses POST and can legitimately take > 4s.
+        if (request.method !== 'GET') {
+            event.respondWith(fetch(request));
+            return;
+        }
+
+        // Use endpoint-aware timeouts for heavy GET endpoints.
+        let timeoutMs = 10000;
+        if (url.pathname.startsWith('/api/history')) {
+            timeoutMs = 20000;
+        } else if (
+            url.pathname.startsWith('/api/playlist-download/status/') ||
+            url.pathname.startsWith('/api/status/')
+        ) {
+            timeoutMs = 12000;
+        }
+
+        event.respondWith(networkFirst(request, API_CACHE, timeoutMs));
         return;
     }
 

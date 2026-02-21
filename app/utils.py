@@ -2,6 +2,7 @@
 
 import re
 import os
+from urllib.parse import parse_qs, urlparse
 
 
 # Supported URL patterns
@@ -52,6 +53,46 @@ def is_playlist(url: str) -> bool:
     
     url = url.strip()
     return any(re.search(pattern, url) for pattern in PLAYLIST_PATTERNS)
+
+
+def extract_playlist_id(url: str) -> str:
+    """
+    Extract playlist ID from a YouTube URL.
+
+    Args:
+        url: YouTube URL
+
+    Returns:
+        Playlist ID or empty string
+    """
+    if not url or not isinstance(url, str):
+        return ''
+
+    url = url.strip()
+    try:
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query or '')
+        values = query.get('list') or []
+        if values:
+            return str(values[0]).strip()
+    except Exception:
+        pass
+
+    match = re.search(r'[?&]list=([\w-]+)', url)
+    if match:
+        return match.group(1)
+
+    return ''
+
+
+def is_unsupported_dynamic_playlist(url: str) -> bool:
+    """
+    Check for dynamic YouTube mix/radio playlists (list=RD...).
+
+    These are auto-generated and often fail in yt-dlp extraction.
+    """
+    playlist_id = extract_playlist_id(url)
+    return bool(playlist_id and playlist_id.upper().startswith('RD'))
 
 
 def sanitize_filename(title: str, max_length: int = 200) -> str:
