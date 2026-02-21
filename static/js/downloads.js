@@ -28,7 +28,7 @@ function switchTab(mode) {
     } else if (mode === 'playlist') {
         playlistTab?.classList.add('active');
         input.placeholder = 'Paste YouTube Playlist URL here...';
-        hint.innerHTML = '<i class="fas fa-list"></i> Supports: youtube.com/playlist, music.youtube.com/playlist';
+        hint.innerHTML = '<i class="fas fa-list"></i> Supports: youtube.com/playlist, music.youtube.com/playlist, and Mix links (list=RD...)';
     } else {
         searchTab?.classList.add('active');
         input.placeholder = 'Search for songs, artists, or albums...';
@@ -184,10 +184,21 @@ function showPlaylistPreview(data) {
     }));
     State.playlist.selected = new Set(State.playlist.items.map(item => item.entry_key));
     State.playlist.title = data.title || 'Playlist';
+    const loadedCount = Number(data.loaded_count || data.playlist_count || State.playlist.items.length);
+    const isLimited = Boolean(data.is_limited);
 
     document.getElementById('playlistTitle').textContent = data.title;
-    document.getElementById('playlistCount').textContent = `(${data.playlist_count} songs)`;
-    document.getElementById('selectedCount').textContent = data.playlist_count;
+    document.getElementById('playlistCount').textContent = isLimited
+        ? `(showing first ${loadedCount} songs)`
+        : `(${loadedCount} songs)`;
+    document.getElementById('selectedCount').textContent = loadedCount;
+
+    if (isLimited) {
+        UI.toast(
+            `Loaded first ${loadedCount} songs for performance on this server. You can download from this loaded set.`,
+            'success'
+        );
+    }
 
     const createPlaylistCheckbox = document.getElementById('autoCreatePlaylistCheckbox');
     if (createPlaylistCheckbox) {

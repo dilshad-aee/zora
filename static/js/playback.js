@@ -9,6 +9,35 @@
 // Current playback index in active queue
 let currentPlayIndex = -1;
 let shuffleRemainingIndices = [];
+let shuffleHistory = [];  // tracks played order for "previous" in shuffle mode
+
+// ─── Next-track preloader (low-latency gapless feel) ─────────────────────────
+let _preloadAudio = null;
+let _preloadedUrl = '';
+
+function _preloadNextTrack() {
+    const queue = State.playback.queue;
+    if (!Array.isArray(queue) || queue.length < 2) return;
+
+    let nextIdx = Player.shuffle ? -1 : currentPlayIndex + 1;
+    if (nextIdx >= queue.length) nextIdx = Player.repeat === 'all' ? 0 : -1;
+    if (nextIdx < 0) return;
+
+    const next = queue[nextIdx];
+    if (!next || !next.filename) return;
+
+    const url = `/play/${encodeURIComponent(next.filename)}`;
+    if (url === _preloadedUrl) return;
+
+    if (_preloadAudio) {
+        _preloadAudio.src = '';
+        _preloadAudio.load();
+    }
+    _preloadAudio = _preloadAudio || new Audio();
+    _preloadAudio.preload = 'auto';
+    _preloadAudio.src = url;
+    _preloadedUrl = url;
+}
 
 function resetShuffleRemainingIndices(excludeIndex = null) {
     const queueLength = Array.isArray(State.playback.queue) ? State.playback.queue.length : 0;
@@ -74,6 +103,7 @@ function setPlaybackQueue(source, tracks, startIndex = 0, playlistId = null) {
         State.playback.playlistId = null;
         currentPlayIndex = -1;
         shuffleRemainingIndices = [];
+        shuffleHistory = [];
         return false;
     }
 
@@ -87,6 +117,7 @@ function setPlaybackQueue(source, tracks, startIndex = 0, playlistId = null) {
 
     currentPlayIndex = Math.max(0, Math.min(startIndex, queue.length - 1));
     resetShuffleRemainingIndices(currentPlayIndex);
+    shuffleHistory = [];
     return true;
 }
 
@@ -109,6 +140,9 @@ function playFromCurrentQueue(index) {
         track.artist || 'Unknown Artist',
         track.thumbnail || ''
     );
+
+    // Warm the browser cache for the next track
+    _preloadNextTrack();
 
     if (isViewActive('playlistsView')) {
         renderSelectedPlaylistPanel();
@@ -178,29 +212,37 @@ function playTrack(filename, title, artist, thumbnail) {
     playFromCurrentQueue(0);
 }
 
-// Play next track (called by Player when song ends)
-function playNextTrack() {
+/**
+ * Play next track in queue.
+ * @param {Object} opts
+ * @param {string} opts.reason - 'user' (button/lock screen) or 'ended' (natural end)
+ */
+function playNextTrack({ reason = 'user' } = {}) {
     const queue = State.playback.queue;
     if (!Array.isArray(queue) || queue.length === 0) return;
+
+    // repeat-one only loops on natural track end, not user "next"
+    // (handled in Player.onEnded — we don't reach here for repeat-one ended)
 
     let nextIndex;
 
     if (Player.shuffle) {
+        // Push current index to history before moving
+        if (currentPlayIndex >= 0) {
+            shuffleHistory.push(currentPlayIndex);
+        }
         nextIndex = takeNextShuffleIndex();
         if (nextIndex === -1) {
             Player.showToast('End of playlist');
             return;
         }
     } else {
-        // Next in order
         nextIndex = currentPlayIndex + 1;
 
-        // End of list
         if (nextIndex >= queue.length) {
             if (Player.repeat === 'all') {
-                nextIndex = 0; // Loop back to start
+                nextIndex = 0;
             } else {
-                // No repeat - stop playback
                 Player.showToast('End of playlist');
                 return;
             }
@@ -214,6 +256,7 @@ function playPreviousTrack() {
     const queue = State.playback.queue;
     if (!Array.isArray(queue) || queue.length === 0) return;
 
+    // If more than 3 seconds into the track, restart it first
     const elapsed = Player.getCurrentTime?.() || 0;
     if (elapsed > 3 && Player.audio) {
         Player.audio.currentTime = 0;
@@ -221,10 +264,16 @@ function playPreviousTrack() {
     }
 
     let previousIndex;
+
     if (Player.shuffle) {
-        do {
-            previousIndex = Math.floor(Math.random() * queue.length);
-        } while (previousIndex === currentPlayIndex && queue.length > 1);
+        // Use shuffle history to go back to the previous track
+        if (shuffleHistory.length > 0) {
+            previousIndex = shuffleHistory.pop();
+        } else {
+            // No history — restart current track
+            if (Player.audio) Player.audio.currentTime = 0;
+            return;
+        }
     } else {
         previousIndex = currentPlayIndex - 1;
         if (previousIndex < 0) {

@@ -2,12 +2,38 @@
 YouTube Service - Search and video info extraction.
 """
 
+import os
+
 import yt_dlp
-from app.utils import format_duration
+from app.utils import format_duration, extract_playlist_id
 
 
 class YouTubeService:
     """Handles YouTube search and video info extraction."""
+
+    @staticmethod
+    def _playlist_preview_limit() -> int:
+        """Resolve safe upper bound for playlist preview extraction."""
+        from app.models import Settings
+
+        raw = None
+
+        # 1) Admin setting from DB (preferred for runtime tuning)
+        try:
+            db_value = Settings.get('playlist_preview_limit', '')
+            if str(db_value).strip():
+                raw = db_value
+        except Exception:
+            raw = None
+
+        # 2) Environment fallback
+        if raw is None:
+            raw = os.getenv(
+                'ZORA_PLAYLIST_PREVIEW_LIMIT',
+                str(Settings.DEFAULT_PREVIEW_LIMIT),
+            )
+
+        return Settings.normalize_preview_limit(raw)
     
     @staticmethod
     def search(query: str, limit: int = 10) -> list:
@@ -126,11 +152,16 @@ class YouTubeService:
         Returns:
             Dictionary with playlist title and list of entries
         """
+        preview_limit = YouTubeService._playlist_preview_limit()
+        playlist_id = extract_playlist_id(url)
+
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': True,  # Don't download, just extract metadata
             'skip_download': True,
+            # Prevent huge Mix/playlist extraction from overwhelming Termux.
+            'playlist_items': f'1:{preview_limit}',
         }
         
         try:
@@ -142,19 +173,25 @@ class YouTubeService:
                 for entry in info.get('entries', []):
                     if entry:
                         video_id = entry.get('id')
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
                         entries.append({
                             'id': video_id,
                             'title': entry.get('title', 'Unknown'),
-                            'url': f"https://www.youtube.com/watch?v={video_id}",
+                            'url': video_url,
                             'thumbnail': entry.get('thumbnail') or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
                             'duration': entry.get('duration', 0),
                             'duration_str': format_duration(entry.get('duration', 0)),
                             'uploader': entry.get('uploader') or entry.get('channel', 'Unknown'),
                         })
-                
+
                 return {
                     'title': info.get('title', 'Unknown Playlist'),
                     'playlist_count': len(entries),
+                    'loaded_count': len(entries),
+                    'preview_limit': preview_limit,
+                    'is_limited': len(entries) >= preview_limit,
+                    'playlist_id': playlist_id,
+                    'is_mix': bool(playlist_id and playlist_id.upper().startswith('RD')),
                     'entries': entries
                 }
                 

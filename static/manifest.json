@@ -1,13 +1,15 @@
 {
+  "id": "/",
   "name": "Zora - Music Downloader",
   "short_name": "Zora",
   "description": "Download and play music from YouTube. Your personal music library.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
-  "background_color": "#1a1a2e",
-  "theme_color": "#6C5CE7",
+  "background_color": "#121212",
+  "theme_color": "#121212",
   "lang": "en",
   "categories": ["music", "entertainment"],
   "icons": [

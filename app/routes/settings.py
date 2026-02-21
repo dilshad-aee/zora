@@ -37,9 +37,17 @@ def update_settings():
         settings_data['skip_duplicates'] = str(data.get('skip_duplicates', True)).lower()
     if 'download_dir' in data:
         settings_data['download_dir'] = str(data.get('download_dir', '') or '').strip()
+    if 'playlist_preview_limit' in data:
+        settings_data['playlist_preview_limit'] = str(
+            Settings.normalize_preview_limit(data.get('playlist_preview_limit'))
+        )
 
     updated = Settings.update_all(settings_data) if settings_data else Settings.get_all()
     updated['download_dir'] = str(get_download_dir())
+    if 'playlist_preview_limit' in updated:
+        updated['playlist_preview_limit'] = Settings.normalize_preview_limit(
+            updated.get('playlist_preview_limit')
+        )
 
     from app.models.audit_log import log_action
     log_action('SETTINGS_UPDATE', target_type='settings', metadata=settings_data)

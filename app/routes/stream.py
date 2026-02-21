@@ -5,8 +5,9 @@ Stream Routes - Audio playback, thumbnails, and file downloads.
 import os
 import re
 
-from flask import Blueprint, jsonify, send_from_directory
+from flask import Blueprint, jsonify, send_from_directory, request, Response
 from flask_login import login_required
+from werkzeug.http import http_date
 
 from app.auth.decorators import admin_required
 from app.storage_paths import get_download_dir, get_thumbnails_dir
@@ -18,6 +19,104 @@ from app.download_preferences import (
 bp = Blueprint('stream', __name__)
 
 BROWSER_SAFE_AUDIO_EXTS = {'.m4a', '.mp3', '.aac', '.ogg', '.wav'}
+
+# ─── Range-request streaming (low-latency, RAM-light) ────────────────────────
+
+_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
+_STREAM_CHUNK_SIZE = 64 * 1024  # 64 KiB – gentle on Termux RAM
+
+
+def _iter_file_range(path, start, length):
+    """Yield fixed-size chunks from *path* starting at *start* for *length* bytes."""
+    with open(path, "rb") as f:
+        f.seek(start)
+        remaining = length
+        while remaining > 0:
+            data = f.read(min(_STREAM_CHUNK_SIZE, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def _parse_single_range(header, size):
+    """Parse a single byte-range from a Range header. Returns (start, end) or None."""
+    if not header:
+        return None
+    m = _RANGE_RE.match(header.strip())
+    if not m:
+        return None
+    start_s, end_s = m.group(1), m.group(2)
+    if start_s == "" and end_s != "":
+        suffix = min(int(end_s), size) if int(end_s) > 0 else 0
+        if suffix <= 0:
+            return None
+        return (size - suffix, size - 1)
+    if start_s != "":
+        start = int(start_s)
+        end = int(end_s) if end_s != "" else size - 1
+        return (start, end) if start <= end else None
+    return None
+
+
+def _audio_response_with_range(path, mimetype, cache_seconds=600):
+    """Serve an audio file with HTTP Range support (206 partial / 200 full)."""
+    st = os.stat(path)
+    size = st.st_size
+    etag = f'W/"{st.st_mtime_ns:x}-{size:x}"'
+    last_modified = http_date(st.st_mtime)
+
+    range_header = request.headers.get("Range", "")
+
+    # 304 Not Modified (skip when Range is present)
+    inm = request.headers.get("If-None-Match")
+    if not range_header and inm and inm.strip() == etag:
+        resp = Response(status=304)
+        resp.headers["ETag"] = etag
+        resp.headers["Last-Modified"] = last_modified
+        resp.headers["Accept-Ranges"] = "bytes"
+        resp.headers["Cache-Control"] = f"private, max-age={cache_seconds}"
+        return resp
+
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "ETag": etag,
+        "Last-Modified": last_modified,
+        "Cache-Control": f"private, max-age={cache_seconds}",
+    }
+
+    byte_range = _parse_single_range(range_header, size)
+
+    if byte_range is not None:
+        start, end = byte_range
+        if start >= size:
+            resp = Response(status=416)
+            resp.headers.update(base_headers)
+            resp.headers["Content-Range"] = f"bytes */{size}"
+            return resp
+        end = min(end, size - 1)
+        length = end - start + 1
+        resp = Response(
+            _iter_file_range(path, start, length) if request.method != "HEAD" else b"",
+            status=206,
+            mimetype=mimetype,
+            direct_passthrough=True,
+        )
+        resp.headers.update(base_headers)
+        resp.headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        resp.headers["Content-Length"] = str(length)
+        return resp
+
+    # Full file (no Range header)
+    resp = Response(
+        _iter_file_range(path, 0, size) if request.method != "HEAD" else b"",
+        status=200,
+        mimetype=mimetype,
+        direct_passthrough=True,
+    )
+    resp.headers.update(base_headers)
+    resp.headers["Content-Length"] = str(size)
+    return resp
 
 
 def _audio_ext_rank(ext: str, preferred_exts=None) -> int:
@@ -149,10 +248,10 @@ def serve_thumbnail(filename):
     return send_from_directory(str(get_thumbnails_dir()), filename)
 
 
-@bp.route('/play/<filename>')
+@bp.route('/play/<filename>', methods=["GET", "HEAD"])
 @login_required
 def play_audio(filename):
-    """Stream audio file for playback."""
+    """Stream audio file with HTTP Range support for instant seek / low-latency start."""
     resolved_filename = _resolve_playable_filename(filename)
     if not resolved_filename:
         return jsonify({'error': 'File not found'}), 404
@@ -178,4 +277,4 @@ def play_audio(filename):
     }
     mime_type = mime_types.get(ext, 'audio/mpeg')
 
-    return send_from_directory(str(download_dir), resolved_filename, mimetype=mime_type)
+    return _audio_response_with_range(str(filepath), mimetype=mime_type)

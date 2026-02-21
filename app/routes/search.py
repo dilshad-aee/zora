@@ -5,7 +5,7 @@ Search Routes - YouTube search and video/playlist info.
 from flask import Blueprint, jsonify, request
 
 from app.auth.decorators import admin_required
-from app.utils import is_valid_url, is_playlist, is_unsupported_dynamic_playlist
+from app.utils import is_valid_url, is_playlist
 from app.services.youtube import YouTubeService
 
 bp = Blueprint('search', __name__)
@@ -73,14 +73,6 @@ def get_playlist_items():
 
     if not is_playlist(url):
         return jsonify({'error': 'Invalid playlist URL'}), 400
-
-    if is_unsupported_dynamic_playlist(url):
-        return jsonify({
-            'error': (
-                'YouTube Mix/Radio playlists (list=RD...) are not supported. '
-                'Use a normal playlist URL (list=PL... or OLAK...).'
-            )
-        }), 400
 
     try:
         items = YouTubeService.get_playlist_items(url)

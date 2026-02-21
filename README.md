@@ -115,6 +115,7 @@ You can configure with environment variables and/or settings API/UI.
 - `ZORA_HOST` (default: `0.0.0.0`)
 - `ZORA_PORT` (default: `5001`)
 - `ZORA_DOWNLOAD_DIR` (highest-priority download folder override)
+- `ZORA_PLAYLIST_PREVIEW_LIMIT` (default: `120`, max: `500`)
 - `SECRET_KEY`
 
 Optional `.env` example:
@@ -122,8 +123,15 @@ Optional `.env` example:
 ZORA_HOST=0.0.0.0
 ZORA_PORT=5001
 ZORA_DOWNLOAD_DIR=/absolute/path/to/music
+ZORA_PLAYLIST_PREVIEW_LIMIT=120
 SECRET_KEY=change-this
 ```
+
+### YouTube Mix (`list=RD...`) Support
+
+- Mix links are supported in playlist mode.
+- To keep Termux responsive, playlist preview loads only the first N items.
+- You can tune this from Admin Settings (`Playlist Preview Cap`) or via `ZORA_PLAYLIST_PREVIEW_LIMIT`.
 
 ### Download Folder Resolution (Priority)
 

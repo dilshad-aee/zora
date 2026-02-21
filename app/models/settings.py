@@ -14,6 +14,11 @@ class Settings(db.Model):
     key = db.Column(db.String(50), unique=True, nullable=False)
     value = db.Column(db.String(500))
     
+    # Playlist preview cap bounds
+    MIN_PREVIEW_LIMIT = 20
+    MAX_PREVIEW_LIMIT = 500
+    DEFAULT_PREVIEW_LIMIT = 120
+
     # Default settings
     DEFAULTS = {
         'default_format': 'm4a',
@@ -22,7 +27,17 @@ class Settings(db.Model):
         'skip_duplicates': 'true',
         'theme': 'dark',
         'download_dir': '',
+        'playlist_preview_limit': '120',
     }
+
+    @classmethod
+    def normalize_preview_limit(cls, raw_value):
+        """Clamp playlist preview cap to a safe range."""
+        try:
+            value = int(str(raw_value).strip())
+        except (ValueError, TypeError):
+            value = cls.DEFAULT_PREVIEW_LIMIT
+        return max(cls.MIN_PREVIEW_LIMIT, min(value, cls.MAX_PREVIEW_LIMIT))
     
     @classmethod
     def get(cls, key, default=None):
@@ -63,6 +78,11 @@ class Settings(db.Model):
             settings['skip_duplicates'] = False
 
         settings['download_dir'] = str(settings.get('download_dir') or '').strip()
+
+        # Playlist preview cap used for Mix / large playlists
+        settings['playlist_preview_limit'] = cls.normalize_preview_limit(
+            settings.get('playlist_preview_limit')
+        )
         
         return settings
     

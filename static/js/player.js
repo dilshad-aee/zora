@@ -17,6 +17,11 @@ const Player = {
     _lastSavedPosition: 0,
     _playbackSaveTimer: null,
 
+    // Strict pause tracking — prevents auto-resume after user pause
+    _userPaused: false,
+    _wasPlayingBeforeHidden: false,
+    _bgResumeTimer: null,
+
     // Playback modes
     shuffle: false,
     repeat: 'off', // 'off', 'all', 'one'
@@ -53,6 +58,9 @@ const Player = {
         // Add gesture controls
         this.setupGestureControls();
 
+        // Lock screen & notification controls (iOS 15+, Android Chrome)
+        this.setupMediaSession();
+
         this.isInitialized = true;
 
         // Load saved settings
@@ -65,11 +73,17 @@ const Player = {
         this.audio.addEventListener('play', () => {
             this.updateButton(true);
             this.updateNowPlayingButtons();
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'playing';
+            }
         });
 
         this.audio.addEventListener('pause', () => {
             this.updateButton(false);
             this.updateNowPlayingButtons();
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+            }
         });
 
         this.audio.addEventListener('ended', () => {
@@ -77,10 +91,17 @@ const Player = {
         });
 
         // Progress events
+        this._lastPositionUpdate = 0;
         this.audio.addEventListener('timeupdate', () => {
             this.updateProgress();
             this.updateNowPlayingProgress();
             this.maybeSavePlaybackState();
+            // Update lock screen scrubber (throttled to every 5s)
+            const now = Date.now();
+            if (now - this._lastPositionUpdate > 5000) {
+                this._lastPositionUpdate = now;
+                this.updateMediaSessionPosition();
+            }
         });
 
         // Save state on pause (user pauses or tabs away)
@@ -92,6 +113,7 @@ const Player = {
             this.updateDuration();
             this.syncNowPlayingUI();
             this.isReady = true;
+            this.updateMediaSessionPosition();
         });
 
         // Loading events
@@ -122,27 +144,121 @@ const Player = {
     },
 
     /**
-     * Setup background play support
+     * Setup background play support (strict — never resumes after user pause)
      */
     setupBackgroundPlay() {
-        // Lock screen controls (iOS Safari)
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && this.audio) {
-                this.audio.play().catch(e => console.log('Background play error:', e));
+            if (!this.audio) return;
+
+            if (document.hidden) {
+                // Record whether audio was actively playing before backgrounding
+                this._wasPlayingBeforeHidden = !this.audio.paused && !this.audio.ended;
+                return;
             }
+
+            // Tab became visible — only resume if it was playing AND user didn't pause
+            if (this._wasPlayingBeforeHidden && !this._userPaused) {
+                this.audio.play().catch(() => {});
+            }
+            this._wasPlayingBeforeHidden = false;
         });
 
-        // Background play detection
+        // iOS sometimes pauses audio when backgrounding — retry once if appropriate
         this.audio.addEventListener('pause', () => {
-            if (document.hidden) {
-                // App was backgrounded - try to resume
-                setTimeout(() => {
-                    if (document.hidden && this.audio && !this.audio.paused) {
-                        this.audio.play().catch(e => console.log('Background resume error:', e));
-                    }
-                }, 1000);
-            }
+            if (!document.hidden) return;
+            if (!this._wasPlayingBeforeHidden) return;
+            if (this._userPaused) return;
+
+            clearTimeout(this._bgResumeTimer);
+            this._bgResumeTimer = setTimeout(() => {
+                if (this.audio && this.audio.paused && !this._userPaused) {
+                    this.audio.play().catch(() => {});
+                }
+            }, 800);
         });
+    },
+
+    /**
+     * Setup MediaSession API for lock screen / notification controls
+     */
+    setupMediaSession() {
+        if (!('mediaSession' in navigator)) return;
+
+        const ms = navigator.mediaSession;
+
+        ms.setActionHandler('play', () => {
+            this._userPaused = false;
+            this.audio?.play().catch(() => {});
+        });
+
+        ms.setActionHandler('pause', () => {
+            this._userPaused = true;
+            this.audio?.pause();
+        });
+
+        ms.setActionHandler('nexttrack', () => {
+            this.playNext();
+        });
+
+        ms.setActionHandler('previoustrack', () => {
+            this.playPrevious();
+        });
+
+        try {
+            ms.setActionHandler('seekto', (details) => {
+                if (this.audio && Number.isFinite(details.seekTime)) {
+                    this.audio.currentTime = details.seekTime;
+                }
+            });
+        } catch (e) { /* unsupported on some browsers */ }
+
+        try {
+            ms.setActionHandler('seekbackward', (details) => {
+                this.skipBackward(details.seekOffset || 10);
+            });
+        } catch (e) { /* unsupported */ }
+
+        try {
+            ms.setActionHandler('seekforward', (details) => {
+                this.skipForward(details.seekOffset || 10);
+            });
+        } catch (e) { /* unsupported */ }
+    },
+
+    /**
+     * Update lock screen metadata (title, artist, artwork)
+     */
+    updateMediaSessionMetadata() {
+        if (!('mediaSession' in navigator) || !this.currentTrack) return;
+
+        const track = this.currentTrack;
+        const artwork = [];
+        if (track.thumbnail) {
+            artwork.push({ src: track.thumbnail, sizes: '512x512', type: 'image/jpeg' });
+        }
+
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: track.title || 'Unknown Title',
+            artist: track.artist || 'Unknown Artist',
+            album: 'Zora',
+            artwork,
+        });
+    },
+
+    /**
+     * Update lock screen position state (scrubber bar)
+     */
+    updateMediaSessionPosition() {
+        if (!('mediaSession' in navigator)) return;
+        if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+
+        try {
+            navigator.mediaSession.setPositionState({
+                duration: this.audio.duration,
+                playbackRate: this.audio.playbackRate || 1,
+                position: Math.min(this.audio.currentTime, this.audio.duration),
+            });
+        } catch (e) { /* ignore */ }
     },
 
     /**
@@ -272,6 +388,7 @@ const Player = {
 
         // Reset state
         this.isReady = false;
+        this._userPaused = false;
         this.setLoading(true);
 
         // Stop current playback cleanly
@@ -283,6 +400,9 @@ const Player = {
 
         // Update UI elements safely
         this.updatePlayerUI(title, artist, thumbnail);
+
+        // Update lock screen / notification controls
+        this.updateMediaSessionMetadata();
 
         // Show player bar
         if (typeof UI !== 'undefined' && UI.show) {
@@ -376,20 +496,23 @@ const Player = {
         if (!this.audio) return;
 
         if (this.audio.paused) {
+            this._userPaused = false;
             this.audio.play().catch((error) => {
                 this.handlePlayError(error, this.currentTrack?.title);
             });
         } else {
+            this._userPaused = true;
             this.audio.pause();
         }
     },
 
 
     /**
-     * Pause playback
+     * Pause playback (strict — marks as user-initiated)
      */
     pause() {
         if (this.audio) {
+            this._userPaused = true;
             this.audio.pause();
         }
     },
@@ -399,6 +522,7 @@ const Player = {
      */
     resume() {
         if (this.audio && this.audio.src) {
+            this._userPaused = false;
             this.audio.play().catch((error) => {
                 this.handlePlayError(error, this.currentTrack?.title);
             });
@@ -722,10 +846,11 @@ const Player = {
      * @private
      */
     onEnded() {
-        // Handle repeat modes
+        // Repeat-one: loop the same track (only on natural end, not user skip)
         if (this.repeat === 'one') {
             this.audio.currentTime = 0;
-            this.audio.play().catch(e => console.log('Repeat play interrupted'));
+            this._userPaused = false;
+            this.audio.play().catch(() => {});
             return;
         }
 
@@ -737,9 +862,9 @@ const Player = {
             progress.style.width = '0%';
         }
 
-        // Play next track from library
+        // Play next track with "ended" reason
         if (typeof window.playNextTrack === 'function') {
-            window.playNextTrack();
+            window.playNextTrack({ reason: 'ended' });
         }
     },
 

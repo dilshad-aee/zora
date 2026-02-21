@@ -85,16 +85,6 @@ def extract_playlist_id(url: str) -> str:
     return ''
 
 
-def is_unsupported_dynamic_playlist(url: str) -> bool:
-    """
-    Check for dynamic YouTube mix/radio playlists (list=RD...).
-
-    These are auto-generated and often fail in yt-dlp extraction.
-    """
-    playlist_id = extract_playlist_id(url)
-    return bool(playlist_id and playlist_id.upper().startswith('RD'))
-
-
 def sanitize_filename(title: str, max_length: int = 200) -> str:
     """
     Clean filename by removing/replacing invalid characters.

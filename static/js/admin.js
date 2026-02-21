@@ -31,6 +31,13 @@ async function loadSettings() {
             settingsDownloadDir.value = settings.download_dir || '';
         }
 
+        const settingsPlaylistPreviewLimit = document.getElementById('settingsPlaylistPreviewLimit');
+        if (settingsPlaylistPreviewLimit) {
+            const raw = Number(settings.playlist_preview_limit);
+            const safe = Number.isFinite(raw) ? Math.min(Math.max(raw, 20), 500) : 120;
+            settingsPlaylistPreviewLimit.value = safe;
+        }
+
         const dupCheck = document.getElementById('settingsDuplicates');
         if (dupCheck) dupCheck.checked = settings.check_duplicates !== false;
 
@@ -47,6 +54,7 @@ async function saveSettings(e) {
             default_format: document.getElementById('settingsFormat').value,
             default_quality: document.getElementById('settingsQuality').value,
             download_dir: document.getElementById('settingsDownloadDir')?.value?.trim() || '',
+            playlist_preview_limit: Number(document.getElementById('settingsPlaylistPreviewLimit')?.value || 120),
             check_duplicates: true,
             skip_duplicates: true
         });

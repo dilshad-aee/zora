@@ -87,15 +87,15 @@ body.sidebar-open {
     top: 0;
     left: 0;
     right: 0;
-    height: 48px;
+    height: calc(48px + var(--safe-area-top));
     padding-top: var(--safe-area-top);
-    background: #000;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bg);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     z-index: 200;
     align-items: center;
     justify-content: space-between;
-    padding-left: max(12px, var(--safe-area-left));
-    padding-right: max(12px, var(--safe-area-right));
+    padding-left: max(16px, var(--safe-area-left));
+    padding-right: max(16px, var(--safe-area-right));
 }
 
 .mobile-header__menu,
@@ -125,8 +125,9 @@ body.sidebar-open {
     align-items: center;
     gap: 10px;
     font-weight: 700;
-    font-size: 1.1rem;
-    color: var(--accent);
+    font-size: 1.05rem;
+    color: var(--text);
+    letter-spacing: -0.01em;
 }
 
 .mobile-header__logo {
@@ -2122,7 +2123,7 @@ audio {
     left: 0;
     right: 0;
     bottom: 0;
-    background: linear-gradient(180deg, #1a1a2e 0%, #121212 100%);
+    background: linear-gradient(180deg, #1a1a1a 0%, var(--bg) 100%);
     z-index: 9999;
     flex-direction: column;
     padding: 12px 20px;
@@ -2530,36 +2531,38 @@ audio {
     bottom: 0;
     left: 0;
     right: 0;
-    height: var(--mobile-nav-height);
+    height: calc(var(--mobile-nav-height) + var(--safe-area-bottom));
     padding-bottom: var(--safe-area-bottom);
-    background: #000;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bg);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     z-index: 150;
     justify-content: space-around;
-    align-items: center;
+    align-items: flex-start;
+    padding-top: 4px;
 }
 
 .mobile-nav__item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
-    padding: 8px 20px;
+    gap: 3px;
+    padding: 6px 20px;
     color: var(--text-muted);
     text-decoration: none;
-    font-size: 0.65rem;
-    font-weight: 500;
+    font-size: 0.6rem;
+    font-weight: 600;
     cursor: pointer;
     transition: color 0.2s;
     -webkit-tap-highlight-color: transparent;
+    letter-spacing: 0.02em;
 }
 
 .mobile-nav__item i {
-    font-size: 1.1rem;
+    font-size: 1.15rem;
 }
 
 .mobile-nav__item.active {
-    color: var(--text);
+    color: var(--accent);
 }
 
 .mobile-nav__item:active {
@@ -6309,4 +6312,31 @@ audio {
 
 .pwa-update-banner button:hover {
     background: rgba(255, 255, 255, 0.25);
+}
+
+/* ===== iOS Standalone PWA Fixes (iPhone 14 Pro / Dynamic Island) ===== */
+@media (display-mode: standalone) {
+    .mobile-header {
+        background: rgba(18, 18, 18, 0.92);
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+    }
+
+    .mobile-nav {
+        background: rgba(18, 18, 18, 0.92);
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+    }
+
+    .player {
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
+    }
+}
+
+/* iPhone 14 Pro / Pro Max (Dynamic Island clearance) */
+@supports (padding-top: env(safe-area-inset-top)) {
+    .mobile-header {
+        height: calc(48px + env(safe-area-inset-top));
+    }
 }

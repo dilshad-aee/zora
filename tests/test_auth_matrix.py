@@ -294,6 +294,12 @@ class TestAdminAccess:
         resp = admin_client.post('/api/settings', json={'default_format': 'm4a'})
         assert resp.status_code == 200
 
+    def test_update_playlist_preview_limit(self, admin_client):
+        resp = admin_client.post('/api/settings', json={'playlist_preview_limit': 9999})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['playlist_preview_limit'] == 500
+
     def test_clear_history(self, admin_client):
         assert admin_client.post('/api/history/clear').status_code == 200
 
