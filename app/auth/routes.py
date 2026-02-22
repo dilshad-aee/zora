@@ -55,7 +55,7 @@ def signup():
     db.session.add(user)
     db.session.commit()
 
-    login_user(user)
+    login_user(user, remember=True)
     user.last_login_at = datetime.utcnow()
     db.session.commit()
 
@@ -87,7 +87,7 @@ def login():
     if not user.is_active:
         return jsonify({'error': 'Account is disabled'}), 403
 
-    login_user(user)
+    login_user(user, remember=True)
     user.last_login_at = datetime.utcnow()
     db.session.commit()
 

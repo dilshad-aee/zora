@@ -12,9 +12,12 @@ const API = {
         const response = await fetch(url, options);
 
         if (response.status === 401) {
-            // Session expired or not logged in — redirect to login
-            State.user = null;
-            showView('login');
+            // Only redirect if user was previously logged in (session expired)
+            if (State.user) {
+                State.user = null;
+                UI.toast('Session expired. Please log in again.', 'error');
+                showView('login');
+            }
             throw new Error('Session expired. Please log in again.');
         }
 

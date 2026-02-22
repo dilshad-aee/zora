@@ -234,9 +234,21 @@ async function openPlaylistDetail(playlistId) {
     }
 }
 
+function _formatTotalDuration(songs) {
+    const totalSec = (songs || []).reduce((sum, s) => sum + (s.duration || 0), 0);
+    if (!totalSec) return '';
+    const hrs = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    if (hrs > 0) return `${hrs} hr ${mins} min`;
+    return `${mins} min`;
+}
+
 function renderPlaylistDetailHeader(pl, isOwner) {
     const header = document.getElementById('playlistDetailHeader');
     if (!header) return;
+
+    const songs = State.playlists.songs || [];
+    const totalDuration = _formatTotalDuration(songs);
 
     const catBadge = pl.category
         ? `<span class="detail-cat-badge" style="--cat-color: ${UI.escapeHtml(pl.category.color)}">
@@ -268,7 +280,7 @@ function renderPlaylistDetailHeader(pl, isOwner) {
                 <p class="playlist-detail__byline">
                     <span>by ${UI.escapeHtml(pl.owner_name)}</span>
                     <span class="playlist-detail__stats">
-                        ${pl.song_count} songs · 
+                        ${songs.length} songs${totalDuration ? ' · ' + totalDuration : ''} · 
                         <span class="playlist-detail__vis">
                             ${pl.visibility === 'public' ? '<i class="fas fa-globe"></i> Public' : '<i class="fas fa-lock"></i> Private'}
                         </span>
@@ -301,6 +313,7 @@ function renderPlaylistDetailSongs(songs, isOwner) {
     const currentSongId = getCurrentPlaybackSongId?.() || null;
     container.innerHTML = songs.map((song, i) => {
         const isPlaying = currentSongId === song.id;
+        const duration = song.duration ? UI.formatTime(song.duration) : '';
 
         return `
         <div class="playlist-song-row ${isPlaying ? 'playing' : ''}" 
@@ -312,6 +325,7 @@ function renderPlaylistDetailSongs(songs, isOwner) {
                 <span class="playlist-song-row__title">${UI.escapeHtml(song.title || 'Unknown')}</span>
                 <span class="playlist-song-row__artist">${UI.escapeHtml(song.artist || song.uploader || 'Unknown')}</span>
             </div>
+            ${duration ? `<span class="playlist-song-row__duration">${duration}</span>` : ''}
             <div class="playlist-song-row__actions">
                 <button class="btn btn--icon btn--small song-menu-trigger" 
                         onclick="event.stopPropagation(); toggleSongMenu(${song.id}, ${isOwner}, this)"
@@ -538,10 +552,14 @@ async function submitCreatePlaylist() {
     }
 
     try {
-        await API.createPlaylist({ name, description, visibility, category_id: category_id || undefined });
+        const pl = await API.createPlaylist({ name, description, visibility, category_id: category_id || undefined });
+        // Push directly into local state so it shows immediately
+        if (!Array.isArray(State.playlists.list)) State.playlists.list = [];
+        State.playlists.list.unshift(pl);
         UI.toast('Playlist created!', 'success');
         closeCreatePlaylistModal();
-        loadMyPlaylists();
+        // Switch to My Playlists tab and render
+        switchPlaylistTab('mine');
         if (visibility === 'public') loadExplorePlaylists();
     } catch (err) {
         UI.toast(err.message, 'error');
@@ -876,9 +894,11 @@ async function createPlaylist() {
     }
     try {
         const pl = await API.createPlaylist({ name });
+        if (!Array.isArray(State.playlists.list)) State.playlists.list = [];
+        State.playlists.list.unshift(pl);
         UI.toast(`Playlist "${pl.name}" created`, 'success');
         if (input) input.value = '';
-        loadMyPlaylists();
+        renderPlaylistGrid('myPlaylistsGrid', State.playlists.list, { showOwner: false, isOwner: true });
         return pl;
     } catch (err) {
         UI.toast(err.message, 'error');
@@ -897,8 +917,33 @@ function updatePlaylistPlaybackControls() {
     const loopBtn = document.getElementById('playlistLoopBtn');
 
     if (playAllBtn) playAllBtn.disabled = !hasSongs;
-    if (shuffleBtn) shuffleBtn.disabled = !hasSongs;
-    if (loopBtn) loopBtn.disabled = !hasSongs;
+    if (shuffleBtn) {
+        shuffleBtn.disabled = !hasSongs;
+        shuffleBtn.classList.toggle('active', Player.shuffle);
+    }
+    if (loopBtn) {
+        loopBtn.disabled = !hasSongs;
+        _syncLoopButtonUI(loopBtn);
+    }
+}
+
+function _syncLoopButtonUI(btn) {
+    if (!btn) return;
+    const mode = Player.repeat || 'off';
+    btn.classList.toggle('active', mode !== 'off');
+    const icon = btn.querySelector('i');
+    const span = btn.querySelector('span');
+    if (icon) {
+        icon.className = 'fas fa-repeat';
+    }
+    if (span) {
+        if (mode === 'one') {
+            span.textContent = '1';
+        } else {
+            span.textContent = '';
+        }
+    }
+    btn.title = mode === 'off' ? 'Repeat: Off' : mode === 'all' ? 'Repeat: All' : 'Repeat: One';
 }
 
 function playSelectedPlaylist(shuffleStart = false) {
@@ -911,8 +956,10 @@ function playSelectedPlaylist(shuffleStart = false) {
     const playlistId = State.playlists.selectedId;
     let startIndex = 0;
 
+    // Explicitly set the mode so the two buttons are mutually exclusive
+    setShuffleMode(shuffleStart);
+
     if (shuffleStart) {
-        setShuffleMode(true);
         startIndex = Math.floor(Math.random() * queue.length);
     }
 
@@ -925,6 +972,7 @@ function setShuffleMode(enabled) {
     Player.shuffle = enabled;
     Player.saveSettings?.();
     Player.updateShuffleButton?.();
+    Player.updateNowPlayingButtons?.();
     const btn = document.getElementById('playlistShuffleBtn');
     if (btn) btn.classList.toggle('active', enabled);
 }
@@ -950,14 +998,8 @@ function togglePlaylistLoop() {
     Player.repeat = modes[(currentIndex + 1) % modes.length];
     Player.saveSettings?.();
     Player.updateRepeatButton?.();
-
-    const btn = document.getElementById('playlistLoopBtn');
-    if (btn) {
-        const labels = { off: 'Loop: Off', all: 'Loop: All', one: 'Loop: One' };
-        const span = btn.querySelector('span');
-        if (span) span.textContent = labels[Player.repeat] || 'Loop: Off';
-        btn.classList.toggle('active', Player.repeat !== 'off');
-    }
+    Player.updateNowPlayingButtons?.();
+    _syncLoopButtonUI(document.getElementById('playlistLoopBtn'));
 }
 
 // Close add songs modal compat (old system)

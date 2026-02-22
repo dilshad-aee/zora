@@ -7,7 +7,7 @@
  *   - Thumbnails (/api/thumbnails/…):    Stale-While-Revalidate
  */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const SHELL_CACHE = `zora-shell-${CACHE_VERSION}`;
 const THUMB_CACHE = `zora-thumbs-${CACHE_VERSION}`;
 const API_CACHE = `zora-api-${CACHE_VERSION}`;
@@ -76,6 +76,12 @@ self.addEventListener('fetch', event => {
 
     // 3. API calls
     if (url.pathname.startsWith('/api/')) {
+        // Auth endpoints — always network-only, never cache
+        if (url.pathname.startsWith('/api/auth/')) {
+            event.respondWith(fetch(request));
+            return;
+        }
+
         // Never cache non-GET API calls and never apply short timeout to them.
         // Large playlist extraction uses POST and can legitimately take > 4s.
         if (request.method !== 'GET') {

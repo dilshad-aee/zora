@@ -287,23 +287,40 @@ const Player = {
      * Setup gesture controls
      */
     setupGestureControls() {
-        // Swipe gestures for mobile
+        // Only handle gestures that originate inside the player or now-playing panel
+        const GESTURE_ZONES = '.player, .now-playing';
+        let gestureActive = false;
         let touchStartX = 0;
         let touchStartY = 0;
         let touchStartTime = 0;
 
         document.addEventListener('touchstart', (e) => {
-            if (e.target.closest('.player__progress-bar, .now-playing__progress-bar')) {
-                // Progress bar seeking - handled separately
+            // Ignore touches outside the player areas
+            if (!e.target.closest(GESTURE_ZONES)) {
+                gestureActive = false;
+                return;
+            }
+            // Don't interfere with progress bars, sliders, or buttons
+            if (e.target.closest('.player__progress-bar, .now-playing__progress-bar, input[type="range"], .player__btn, .now-playing__btn')) {
+                gestureActive = false;
+                return;
+            }
+            // Only respond when a track is loaded
+            if (!this.currentTrack) {
+                gestureActive = false;
                 return;
             }
 
+            gestureActive = true;
             touchStartX = e.touches[0].clientX;
             touchStartY = e.touches[0].clientY;
             touchStartTime = Date.now();
         });
 
         document.addEventListener('touchend', (e) => {
+            if (!gestureActive) return;
+            gestureActive = false;
+
             const touchEndX = e.changedTouches[0].clientX;
             const touchEndY = e.changedTouches[0].clientY;
             const touchEndTime = Date.now();
@@ -312,50 +329,24 @@ const Player = {
             const deltaY = touchEndY - touchStartY;
             const deltaTime = touchEndTime - touchStartTime;
 
-            // Swipe detection
+            // Swipe detection — only within player zones
             if (Math.abs(deltaX) > 50 && Math.abs(deltaY) < 30 && deltaTime < 300) {
                 if (deltaX > 0) {
-                    // Swipe right - next track
                     this.triggerHaptic();
                     this.skipForward(10);
                 } else {
-                    // Swipe left - previous track
                     this.triggerHaptic();
                     this.skipBackward(10);
                 }
             }
-
-            // Tap detection
-            if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && deltaTime < 200) {
-                // Simple tap - trigger haptic feedback
-                this.triggerHaptic();
-            }
         });
 
-        // Double tap for play/pause
-        let lastTapTime = 0;
-        document.addEventListener('touchend', (e) => {
-            const currentTime = Date.now();
-            const deltaTime = currentTime - lastTapTime;
-
-            if (deltaTime < 300) {
-                // Double tap detected
-                this.triggerHaptic();
-                this.toggle();
-                lastTapTime = 0; // Reset
-            } else {
-                lastTapTime = currentTime;
-            }
-        });
-
-        // Long press for more options
+        // Long press for more options — only on player buttons
         let longPressTimeout;
         document.addEventListener('touchstart', (e) => {
             if (e.target.closest('.player__btn')) {
                 longPressTimeout = setTimeout(() => {
                     this.triggerHaptic();
-                    // Show context menu (could be implemented)
-                    console.log('Long press detected - show context menu');
                 }, 500);
             }
         });
@@ -599,23 +590,93 @@ const Player = {
 
     /**
      * Seek to position (supports mouse and touch)
-     * @param {Event} event - Click or touch event
      */
     seek(event) {
         if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
-
         const bar = document.getElementById('playerProgressBar');
         if (!bar) return;
-
         const rect = bar.getBoundingClientRect();
-
-        // Support both mouse and touch events
-        const clientX = event.touches
-            ? event.touches[0].clientX
-            : event.clientX;
-
+        const clientX = event.touches ? event.touches[0].clientX : event.clientX;
         const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
         this.audio.currentTime = percent * this.audio.duration;
+    },
+
+    /**
+     * Setup drag-to-seek on a progress bar (industry-standard scrubbing).
+     * Handles mousedown/touchstart → move → up/end lifecycle.
+     */
+    _setupProgressDrag(barId, fillId, handleId, timeId, seekFn) {
+        const bar = document.getElementById(barId);
+        if (!bar) return;
+        const fill = document.getElementById(fillId);
+        const handle = document.getElementById(handleId);
+        const timeEl = timeId ? document.getElementById(timeId) : null;
+        let dragging = false;
+
+        const getPercent = (clientX) => {
+            const rect = bar.getBoundingClientRect();
+            return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        };
+
+        const updateVisual = (percent) => {
+            const pct = `${percent * 100}%`;
+            if (fill) fill.style.width = pct;
+            if (handle) handle.style.left = pct;
+            if (timeEl && this.audio && !isNaN(this.audio.duration)) {
+                timeEl.textContent = this.formatTime(percent * this.audio.duration);
+            }
+        };
+
+        const commitSeek = (percent) => {
+            if (this.audio && this.audio.duration && !isNaN(this.audio.duration)) {
+                this.audio.currentTime = percent * this.audio.duration;
+            }
+        };
+
+        const onStart = (e) => {
+            if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dragging = true;
+            bar.classList.add('dragging');
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            updateVisual(getPercent(clientX));
+        };
+
+        const onMove = (e) => {
+            if (!dragging) return;
+            e.preventDefault();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            updateVisual(getPercent(clientX));
+        };
+
+        const onEnd = (e) => {
+            if (!dragging) return;
+            dragging = false;
+            bar.classList.remove('dragging');
+            const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
+            const percent = getPercent(clientX);
+            commitSeek(percent);
+            updateVisual(percent);
+        };
+
+        // Bar events (start drag)
+        bar.addEventListener('mousedown', onStart);
+        bar.addEventListener('touchstart', onStart, { passive: false });
+
+        // Document events (continue + end drag)
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onEnd);
+        document.addEventListener('touchend', onEnd);
+
+        // Simple click-to-seek (no drag)
+        bar.addEventListener('click', (e) => {
+            if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+            const percent = getPercent(e.clientX);
+            commitSeek(percent);
+            updateVisual(percent);
+        });
     },
 
     /**
@@ -1241,25 +1302,11 @@ const Player = {
             });
         }
 
-        // Now Playing progress bar
-        const npProgressBar = document.getElementById('nowPlayingProgressBar');
-        if (npProgressBar) {
-            npProgressBar.addEventListener('click', (e) => this.seekFromNowPlaying(e));
-            npProgressBar.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                this.seekFromNowPlaying(e);
-            }, { passive: false });
-        }
+        // Progress bar drag-to-seek (player bar)
+        this._setupProgressDrag('playerProgressBar', 'playerProgress', 'playerHandle', 'playerTime');
 
-        // Progress bar seeking
-        const progressBar = document.getElementById('playerProgressBar');
-        if (progressBar) {
-            progressBar.addEventListener('click', (e) => this.seek(e));
-            progressBar.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                this.seek(e);
-            }, { passive: false });
-        }
+        // Progress bar drag-to-seek (now playing panel)
+        this._setupProgressDrag('nowPlayingProgressBar', 'nowPlayingProgress', null, 'nowPlayingTime');
 
         // Cast button
         document.getElementById('btnCast')?.addEventListener('click', (e) => {

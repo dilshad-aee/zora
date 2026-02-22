@@ -119,5 +119,5 @@ def google_callback():
     user.last_login_at = datetime.utcnow()
     db.session.commit()
 
-    login_user(user)
+    login_user(user, remember=True)
     return redirect('/')

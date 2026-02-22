@@ -3,6 +3,7 @@ Configuration Module for YT Music Downloader.
 Centralizes all app settings with environment variable support.
 """
 
+import hashlib
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -20,8 +21,11 @@ class Config:
     THUMBNAILS_DIR = DOWNLOAD_DIR / 'thumbnails'
     DATABASE_PATH = BASE_DIR / 'data.db'
     
-    # Flask
-    SECRET_KEY = os.getenv('SECRET_KEY', os.urandom(24).hex())
+    # Flask — stable fallback key derived from the DB path so it survives restarts
+    _fallback_key = hashlib.sha256(
+        f'zora-secret-{Path(__file__).parent.parent / "data.db"}'.encode()
+    ).hexdigest()
+    SECRET_KEY = os.getenv('SECRET_KEY', _fallback_key)
     DEBUG = os.getenv('FLASK_DEBUG', 'true').lower() == 'true'
     
     # Database

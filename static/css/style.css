@@ -1985,9 +1985,28 @@ body.sidebar-open {
     transform: translate(-50%, -50%) scale(1);
 }
 
+/* Always show handle on touch devices */
+@media (pointer: coarse) {
+    .player__progress-handle {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
 .player__progress-bar:hover,
 .player__progress-bar.dragging {
     height: 8px;
+}
+
+/* Enlarged touch target (44px min per Apple HIG) */
+.player__progress-bar::before,
+.now-playing__progress-bar::before {
+    content: '';
+    position: absolute;
+    top: -18px;
+    bottom: -18px;
+    left: 0;
+    right: 0;
 }
 
 /* Extra Controls */
@@ -2228,11 +2247,13 @@ audio {
 }
 
 .now-playing__progress-bar {
-    height: 4px;
+    height: 6px;
     background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
-    overflow: hidden;
+    border-radius: 3px;
+    overflow: visible;
     cursor: pointer;
+    touch-action: none;
+    position: relative;
 }
 
 .now-playing__progress-fill {
@@ -5806,8 +5827,13 @@ audio {
 }
 
 .playlist-song-row.playing {
-    background: rgba(108, 92, 231, 0.1);
+    background: rgba(108, 92, 231, 0.12);
     border-left: 3px solid var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.15);
+}
+
+.playlist-song-row.playing .playlist-song-row__title {
+    color: var(--accent);
 }
 
 .playlist-song-row__num {
@@ -5852,6 +5878,15 @@ audio {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.playlist-song-row__duration {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    min-width: 36px;
+    text-align: right;
 }
 
 .playlist-song-row__actions {

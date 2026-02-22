@@ -5,6 +5,7 @@ Flask application factory and initialization.
 """
 
 import os
+from datetime import timedelta
 from flask import Flask, jsonify
 from config import config
 
@@ -58,6 +59,12 @@ def create_app(testing=False):
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV') == 'production'
+    
+    # Remember-me cookie (persists login across browser/app restarts)
+    app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
+    app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+    app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
+    app.config['REMEMBER_COOKIE_SECURE'] = os.getenv('FLASK_ENV') == 'production'
     
     # Ensure directories exist
     config.ensure_dirs()
