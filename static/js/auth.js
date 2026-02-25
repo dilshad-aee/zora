@@ -155,6 +155,11 @@ async function handleLogout() {
     State.playlistSession = null;
     localStorage.removeItem('playlist_download_session');
 
+    // Clear cached audio to prevent cross-user data leak
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_AUDIO_CACHE' });
+    }
+
     // Clear UI elements
     const libraryGrid = document.getElementById('libraryGrid');
     if (libraryGrid) libraryGrid.innerHTML = '';

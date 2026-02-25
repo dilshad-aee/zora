@@ -11,7 +11,8 @@ const CACHE_VERSION = 'v5';
 const SHELL_CACHE = `zora-shell-${CACHE_VERSION}`;
 const THUMB_CACHE = `zora-thumbs-${CACHE_VERSION}`;
 const API_CACHE = `zora-api-${CACHE_VERSION}`;
-const AUDIO_CACHE = `zora-audio-${CACHE_VERSION}`;
+// Audio cache is version-independent — survives SW updates, cleared on logout
+const AUDIO_CACHE = 'zora-audio-lru';
 const AUDIO_MAX_ENTRIES = 40;
 
 // Core app shell assets cached on install
@@ -183,6 +184,7 @@ async function staleWhileRevalidate(request, cacheName) {
  * Handle /play/ requests with an LRU audio cache.
  * - Cache hit: serve instantly (slicing for Range requests)
  * - Cache miss: fetch from network; cache full 200 responses for future replay
+ * - Cache write errors never break online playback
  */
 async function handleAudioFetch(request) {
     const cache = await caches.open(AUDIO_CACHE);
@@ -197,60 +199,91 @@ async function handleAudioFetch(request) {
                 return await serveRangeFromCache(cached, rangeHeader);
             } catch {
                 // Corrupted entry — evict and fall through to network
-                cache.delete(cacheKey);
+                await cache.delete(cacheKey);
             }
         } else {
-            return cached.clone();
+            // LRU touch: re-insert to move to end of insertion order
+            cache.delete(cacheKey).then(() => cache.put(cacheKey, cached.clone())).catch(() => {});
+            return cached;
         }
     }
 
-    // 2. Network fetch
+    // 2. Network fetch — cache errors must never block playback
+    let response;
     try {
-        const response = await fetch(request);
-
-        // Only cache complete 200 responses (preload fetches without Range)
-        if (response.status === 200) {
-            await cache.put(cacheKey, response.clone());
-            trimAudioCache(cache);
-        }
-
-        return response;
+        response = await fetch(request);
     } catch {
         return new Response('Audio unavailable offline', {
             status: 503,
             headers: { 'Content-Type': 'text/plain' },
         });
     }
+
+    // 3. Cache full 200 responses in the background (preload fetches)
+    if (response.status === 200) {
+        try {
+            await cache.put(cacheKey, response.clone());
+            await trimAudioCache(cache);
+        } catch { /* QuotaExceeded or write error — swallow, playback continues */ }
+    }
+
+    return response;
 }
 
-/** Slice a cached full response to serve an HTTP 206 Range response. */
+/**
+ * Slice a cached full response to serve an HTTP 206 Range response.
+ * Supports standard ranges (bytes=N-M, bytes=N-) and suffix ranges (bytes=-N).
+ */
 async function serveRangeFromCache(cachedResponse, rangeHeader) {
     const body = await cachedResponse.clone().arrayBuffer();
     const size = body.byteLength;
 
-    const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-    if (!match) return new Response(body, { status: 200, headers: cachedResponse.headers });
+    const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+    if (!match) {
+        // Unknown range format (multi-range, etc.) — return full response
+        return new Response(body, { status: 200, headers: cachedResponse.headers });
+    }
 
-    const start = parseInt(match[1]);
-    const end = match[2] ? Math.min(parseInt(match[2]), size - 1) : size - 1;
+    const startStr = match[1];
+    const endStr = match[2];
+    let start, end;
+
+    if (startStr === '' && endStr !== '') {
+        // Suffix range: bytes=-N (last N bytes)
+        const suffix = Number(endStr);
+        if (!Number.isFinite(suffix) || suffix <= 0) {
+            return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+        }
+        start = Math.max(0, size - suffix);
+        end = size - 1;
+    } else if (startStr !== '') {
+        start = Number(startStr);
+        end = endStr ? Math.min(Number(endStr), size - 1) : size - 1;
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+            return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+        }
+    } else {
+        // Both empty — invalid
+        return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+    }
 
     if (start >= size) {
-        return new Response(null, {
-            status: 416,
-            headers: { 'Content-Range': `bytes */${size}` },
-        });
+        return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
     }
 
     const slice = body.slice(start, end + 1);
-    return new Response(slice, {
-        status: 206,
-        headers: {
-            'Content-Type': cachedResponse.headers.get('Content-Type') || 'audio/mpeg',
-            'Content-Length': String(slice.byteLength),
-            'Content-Range': `bytes ${start}-${end}/${size}`,
-            'Accept-Ranges': 'bytes',
-        },
+    const headers = new Headers({
+        'Content-Type': cachedResponse.headers.get('Content-Type') || 'audio/mpeg',
+        'Content-Length': String(slice.byteLength),
+        'Content-Range': `bytes ${start}-${end}/${size}`,
+        'Accept-Ranges': 'bytes',
     });
+    // Forward cache-related headers from the original server response
+    for (const h of ['ETag', 'Last-Modified', 'Cache-Control']) {
+        const v = cachedResponse.headers.get(h);
+        if (v) headers.set(h, v);
+    }
+    return new Response(slice, { status: 206, headers });
 }
 
 /** Evict oldest entries when audio cache exceeds the max. */
@@ -263,6 +296,14 @@ async function trimAudioCache(cache) {
         await cache.delete(keys[i]);
     }
 }
+
+// ─── Message handler (logout cache clearing) ────────────────────────────────
+
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'CLEAR_AUDIO_CACHE') {
+        event.waitUntil(caches.delete(AUDIO_CACHE));
+    }
+});
 
 // ─── Background Sync (future-proof hook) ─────────────────────────────────────
 
