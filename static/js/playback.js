@@ -11,9 +11,9 @@ let currentPlayIndex = -1;
 let shuffleRemainingIndices = [];
 let shuffleHistory = [];  // tracks played order for "previous" in shuffle mode
 
-// ─── Next-track preloader (low-latency gapless feel) ─────────────────────────
-let _preloadAudio = null;
+// ─── Next-track preloader (populates SW audio cache for instant playback) ────
 let _preloadedUrl = '';
+let _preloadAbort = null;
 
 function _preloadNextTrack() {
     const queue = State.playback.queue;
@@ -39,14 +39,13 @@ function _preloadNextTrack() {
     const url = `/play/${encodeURIComponent(next.filename)}`;
     if (url === _preloadedUrl) return;
 
-    if (_preloadAudio) {
-        _preloadAudio.src = '';
-        _preloadAudio.load();
-    }
-    _preloadAudio = _preloadAudio || new Audio();
-    _preloadAudio.preload = 'auto';
-    _preloadAudio.src = url;
+    // Abort any in-progress preload to save bandwidth on rapid skips
+    if (_preloadAbort) _preloadAbort.abort();
+    _preloadAbort = new AbortController();
     _preloadedUrl = url;
+
+    // Fetch without Range header → server returns 200 → SW caches the full file
+    fetch(url, { signal: _preloadAbort.signal }).catch(() => {});
 }
 
 function resetShuffleRemainingIndices(excludeIndex = null) {

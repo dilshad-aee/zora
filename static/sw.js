@@ -3,14 +3,16 @@
  * Strategy:
  *   - App shell (HTML, CSS, JS, fonts):  Cache-First with network fallback
  *   - API calls:                         Network-First with cache fallback
- *   - Audio streams (/play/…):           Network-only (too large to cache)
+ *   - Audio streams (/play/…):           LRU cache (instant replay for recently played tracks)
  *   - Thumbnails (/api/thumbnails/…):    Stale-While-Revalidate
  */
 
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const SHELL_CACHE = `zora-shell-${CACHE_VERSION}`;
 const THUMB_CACHE = `zora-thumbs-${CACHE_VERSION}`;
 const API_CACHE = `zora-api-${CACHE_VERSION}`;
+const AUDIO_CACHE = `zora-audio-${CACHE_VERSION}`;
+const AUDIO_MAX_ENTRIES = 40;
 
 // Core app shell assets cached on install
 const SHELL_ASSETS = [
@@ -46,7 +48,7 @@ self.addEventListener('install', event => {
 // ─── Activate: clean up old caches ──────────────────────────────────────────
 
 self.addEventListener('activate', event => {
-    const CURRENT = new Set([SHELL_CACHE, THUMB_CACHE, API_CACHE]);
+    const CURRENT = new Set([SHELL_CACHE, THUMB_CACHE, API_CACHE, AUDIO_CACHE]);
 
     event.waitUntil(
         caches.keys()
@@ -63,9 +65,12 @@ self.addEventListener('fetch', event => {
     const { request } = event;
     const url = new URL(request.url);
 
-    // 1. Audio streams — always network-only (range requests, too large)
+    // 1. Audio streams — LRU cache for instant replay
     if (url.pathname.startsWith('/play/')) {
-        return; // let browser handle normally
+        if (request.method === 'GET') {
+            event.respondWith(handleAudioFetch(request));
+        }
+        return;
     }
 
     // 2. Thumbnails — Stale-While-Revalidate
@@ -170,6 +175,93 @@ async function staleWhileRevalidate(request, cacheName) {
     }).catch(() => null);
 
     return cached || fetchPromise;
+}
+
+// ─── Audio LRU Cache ────────────────────────────────────────────────────────
+
+/**
+ * Handle /play/ requests with an LRU audio cache.
+ * - Cache hit: serve instantly (slicing for Range requests)
+ * - Cache miss: fetch from network; cache full 200 responses for future replay
+ */
+async function handleAudioFetch(request) {
+    const cache = await caches.open(AUDIO_CACHE);
+    const cacheKey = new Request(new URL(request.url).pathname);
+    const rangeHeader = request.headers.get('Range');
+
+    // 1. Try cache — instant replay
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+        if (rangeHeader) {
+            try {
+                return await serveRangeFromCache(cached, rangeHeader);
+            } catch {
+                // Corrupted entry — evict and fall through to network
+                cache.delete(cacheKey);
+            }
+        } else {
+            return cached.clone();
+        }
+    }
+
+    // 2. Network fetch
+    try {
+        const response = await fetch(request);
+
+        // Only cache complete 200 responses (preload fetches without Range)
+        if (response.status === 200) {
+            await cache.put(cacheKey, response.clone());
+            trimAudioCache(cache);
+        }
+
+        return response;
+    } catch {
+        return new Response('Audio unavailable offline', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' },
+        });
+    }
+}
+
+/** Slice a cached full response to serve an HTTP 206 Range response. */
+async function serveRangeFromCache(cachedResponse, rangeHeader) {
+    const body = await cachedResponse.clone().arrayBuffer();
+    const size = body.byteLength;
+
+    const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+    if (!match) return new Response(body, { status: 200, headers: cachedResponse.headers });
+
+    const start = parseInt(match[1]);
+    const end = match[2] ? Math.min(parseInt(match[2]), size - 1) : size - 1;
+
+    if (start >= size) {
+        return new Response(null, {
+            status: 416,
+            headers: { 'Content-Range': `bytes */${size}` },
+        });
+    }
+
+    const slice = body.slice(start, end + 1);
+    return new Response(slice, {
+        status: 206,
+        headers: {
+            'Content-Type': cachedResponse.headers.get('Content-Type') || 'audio/mpeg',
+            'Content-Length': String(slice.byteLength),
+            'Content-Range': `bytes ${start}-${end}/${size}`,
+            'Accept-Ranges': 'bytes',
+        },
+    });
+}
+
+/** Evict oldest entries when audio cache exceeds the max. */
+async function trimAudioCache(cache) {
+    const keys = await cache.keys();
+    if (keys.length <= AUDIO_MAX_ENTRIES) return;
+
+    const toDelete = keys.length - AUDIO_MAX_ENTRIES;
+    for (let i = 0; i < toDelete; i++) {
+        await cache.delete(keys[i]);
+    }
 }
 
 // ─── Background Sync (future-proof hook) ─────────────────────────────────────

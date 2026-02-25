@@ -59,7 +59,7 @@ def _parse_single_range(header, size):
     return None
 
 
-def _audio_response_with_range(path, mimetype, cache_seconds=600):
+def _audio_response_with_range(path, mimetype, cache_seconds=86400):
     """Serve an audio file with HTTP Range support (206 partial / 200 full)."""
     st = os.stat(path)
     size = st.st_size
