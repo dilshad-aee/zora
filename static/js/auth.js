@@ -130,9 +130,14 @@ async function handleLogout() {
     // Clear all app state
     State.user = null;
     State.downloads = [];
-    State.playlists.items = [];
+    State.playlists.list = [];
     State.playlists.selectedId = null;
     State.playlists.songs = [];
+    State.playlists.addModalSongId = null;
+    State.playlists.addSongsModalTargetPlaylistId = null;
+    State.playlists.addSongsModalSearch = '';
+    State.playlists.addSongsModalAddingIds = new Set();
+    State.playlists.listSearch = '';
     State.playback.queue = [];
     State.playback.source = 'library';
     State.playback.playlistId = null;
@@ -141,6 +146,14 @@ async function handleLogout() {
     State.currentJobId = null;
     State.library.visibleCount = 0;
     State.library.searchQuery = '';
+
+    // Stop any active playlist download polling
+    if (State.playlistPollInterval) {
+        clearInterval(State.playlistPollInterval);
+        State.playlistPollInterval = null;
+    }
+    State.playlistSession = null;
+    localStorage.removeItem('playlist_download_session');
 
     // Clear UI elements
     const libraryGrid = document.getElementById('libraryGrid');

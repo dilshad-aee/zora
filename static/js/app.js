@@ -20,7 +20,7 @@ const State = {
     lastDownloaded: null,
     downloads: [],
     playlists: {
-        items: [],
+        list: [],
         selectedId: null,
         songs: [],
         addModalSongId: null,
@@ -537,10 +537,9 @@ function showView(viewName) {
         requestAnimationFrame(maybeLoadMoreLibraryByScroll);
     } else if (viewName === 'playlists') {
         document.getElementById('playlistsView')?.classList.remove('hidden');
-        switchPlaylistWorkspace(State.playlists.workspace || 'library', { silent: true });
-        loadPlaylists(true).catch((error) => {
-            console.error('Failed to refresh playlists view:', error);
-        });
+        // Trigger data load for the currently active playlist tab
+        const activeTab = (_playlistActiveTab === 'detail') ? (_playlistDetailSource || 'explore') : (_playlistActiveTab || 'explore');
+        switchPlaylistTab(activeTab);
     } else if (viewName === 'playlist-downloads') {
         document.getElementById('playlistDownloadsView')?.classList.remove('hidden');
     } else if (viewName === 'profile') {

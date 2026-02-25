@@ -155,8 +155,11 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
     """Background download task."""
     print(f"[JOB:{job_id}] Starting background download for {url}", flush=True)
 
+    from app import create_app
     from app.downloader import YTMusicDownloader
     from app.models import Download
+
+    app = create_app()
 
     queue_service.update_download(job_id,
         started_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -284,8 +287,6 @@ def _background_download(job_id: str, url: str, audio_format: str, quality: str,
 
             print(f"[JOB:{job_id}] Merged track_data thumbnail: {track_data.get('thumbnail', 'NONE')[:60] if track_data.get('thumbnail') else 'NONE'}", flush=True)
 
-            from app import create_app
-            app = create_app()
             with app.app_context():
                 save_track(track_data)
 

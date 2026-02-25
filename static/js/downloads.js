@@ -154,11 +154,9 @@ function clearResults() {
 async function fetchPlaylistInfo(url) {
     UI.showLoader('Loading playlist...');
     try {
-        const response = await fetch('/api/playlist/items', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
+        const response = await API._fetch('/api/playlist/items',
+            API._jsonOptions('POST', { url })
+        );
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);

@@ -553,14 +553,16 @@ const Player = {
         if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
 
         const percent = (this.audio.currentTime / this.audio.duration) * 100;
+        const playerBar = document.getElementById('playerProgressBar');
+        const isScrubbing = playerBar?.classList.contains('dragging');
 
         const progress = document.getElementById('playerProgress');
-        if (progress) {
+        if (progress && !isScrubbing) {
             progress.style.width = `${percent}%`;
         }
 
         const timeEl = document.getElementById('playerTime');
-        if (timeEl) {
+        if (timeEl && !isScrubbing) {
             timeEl.textContent = this.formatTime(this.audio.currentTime);
         }
     },
@@ -612,10 +614,36 @@ const Player = {
         const handle = document.getElementById(handleId);
         const timeEl = timeId ? document.getElementById(timeId) : null;
         let dragging = false;
+        let currentPercent = 0;
+        let rafId = null;
+        let pendingPercent = null;
 
         const getPercent = (clientX) => {
             const rect = bar.getBoundingClientRect();
             return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        };
+
+        const getClientX = (e) => {
+            if (typeof e.clientX === 'number') return e.clientX;
+            if (e.touches && e.touches[0]) return e.touches[0].clientX;
+            if (e.changedTouches && e.changedTouches[0]) return e.changedTouches[0].clientX;
+            return null;
+        };
+
+        const seekToPercent = (percent) => {
+            if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+            this.audio.currentTime = percent * this.audio.duration;
+        };
+
+        const scheduleSeek = (percent) => {
+            pendingPercent = percent;
+            if (rafId) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                if (pendingPercent == null) return;
+                seekToPercent(pendingPercent);
+                pendingPercent = null;
+            });
         };
 
         const updateVisual = (percent) => {
@@ -628,9 +656,12 @@ const Player = {
         };
 
         const commitSeek = (percent) => {
-            if (this.audio && this.audio.duration && !isNaN(this.audio.duration)) {
-                this.audio.currentTime = percent * this.audio.duration;
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+                pendingPercent = null;
             }
+            seekToPercent(percent);
         };
 
         const onStart = (e) => {
@@ -639,25 +670,47 @@ const Player = {
             e.stopPropagation();
             dragging = true;
             bar.classList.add('dragging');
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            updateVisual(getPercent(clientX));
+            const clientX = getClientX(e);
+            if (clientX == null) return;
+            currentPercent = getPercent(clientX);
+            updateVisual(currentPercent);
+            scheduleSeek(currentPercent);
         };
 
         const onMove = (e) => {
             if (!dragging) return;
             e.preventDefault();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            updateVisual(getPercent(clientX));
+            const clientX = getClientX(e);
+            if (clientX == null) return;
+            currentPercent = getPercent(clientX);
+            updateVisual(currentPercent);
+            scheduleSeek(currentPercent);
         };
 
         const onEnd = (e) => {
             if (!dragging) return;
             dragging = false;
             bar.classList.remove('dragging');
-            const clientX = e.changedTouches ? e.changedTouches[0].clientX : e.clientX;
-            const percent = getPercent(clientX);
+            const clientX = getClientX(e);
+            const percent = clientX == null ? currentPercent : getPercent(clientX);
+            currentPercent = percent;
             commitSeek(percent);
             updateVisual(percent);
+        };
+
+        const onCancel = () => {
+            if (!dragging) return;
+            dragging = false;
+            bar.classList.remove('dragging');
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+                pendingPercent = null;
+            }
+            if (this.audio && this.audio.duration && !isNaN(this.audio.duration)) {
+                const percent = this.audio.currentTime / this.audio.duration;
+                updateVisual(Math.max(0, Math.min(1, percent)));
+            }
         };
 
         // Bar events (start drag)
@@ -669,14 +722,8 @@ const Player = {
         document.addEventListener('touchmove', onMove, { passive: false });
         document.addEventListener('mouseup', onEnd);
         document.addEventListener('touchend', onEnd);
-
-        // Simple click-to-seek (no drag)
-        bar.addEventListener('click', (e) => {
-            if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
-            const percent = getPercent(e.clientX);
-            commitSeek(percent);
-            updateVisual(percent);
-        });
+        document.addEventListener('touchcancel', onCancel);
+        window.addEventListener('blur', onCancel);
     },
 
     /**
@@ -712,7 +759,7 @@ const Player = {
 
         const feedback = document.createElement('div');
         feedback.id = 'skipFeedback';
-        feedback.className = 'skip-feedback skip-feedback--${direction}';
+        feedback.className = `skip-feedback skip-feedback--${direction}`;
         feedback.innerHTML = `
             <div class="skip-feedback__content">
                 <i class="fas fa-${direction === 'forward' ? 'forward' : 'backward'}"></i>
@@ -809,7 +856,9 @@ const Player = {
         ];
 
         sliders.forEach(slider => {
-            if (slider) slider.value = volumePercent;
+            if (!slider) return;
+            slider.value = volumePercent;
+            slider.style.setProperty('--slider-percent', `${volumePercent}%`);
         });
     },
 
@@ -1775,12 +1824,14 @@ const Player = {
         if (!this.audio || isNaN(this.audio.duration)) return;
 
         const percent = (this.audio.currentTime / this.audio.duration) * 100;
+        const progressBar = document.getElementById('nowPlayingProgressBar');
+        const isScrubbing = progressBar?.classList.contains('dragging');
 
         const fill = document.getElementById('nowPlayingProgress');
-        if (fill) fill.style.width = `${percent}%`;
+        if (fill && !isScrubbing) fill.style.width = `${percent}%`;
 
         const timeEl = document.getElementById('nowPlayingTime');
-        if (timeEl) timeEl.textContent = this.formatTime(this.audio.currentTime);
+        if (timeEl && !isScrubbing) timeEl.textContent = this.formatTime(this.audio.currentTime);
 
         const durationEl = document.getElementById('nowPlayingDuration');
         if (durationEl) durationEl.textContent = this.formatTime(this.audio.duration);

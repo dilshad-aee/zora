@@ -104,15 +104,13 @@ async function downloadSelectedSongsNew() {
         : '';
 
     try {
-        const response = await fetch('/api/playlist-download/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        const response = await API._fetch('/api/playlist-download/start',
+            API._jsonOptions('POST', {
                 songs: selectedSongs,
                 create_playlist: autoCreatePlaylist,
                 playlist_name: playlistName
             })
-        });
+        );
 
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
@@ -148,7 +146,7 @@ function startPlaylistPolling() {
         if (!State.playlistSession) return;
 
         try {
-            const response = await fetch(
+            const response = await API._fetch(
                 `/api/playlist-download/status/${State.playlistSession}`
             );
 

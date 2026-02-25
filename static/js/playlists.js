@@ -650,27 +650,27 @@ async function submitEditPlaylist(playlistId) {
 
 // ==================== Delete Playlist ====================
 
-function deleteSelectedPlaylist() {
+async function deleteSelectedPlaylist() {
     const playlistId = State.playlists.selectedId;
     if (!playlistId) return;
 
-    if (typeof openConfirmAction === 'function') {
-        openConfirmAction(
-            'Delete this playlist?',
-            'All songs will be removed from this playlist. This cannot be undone.',
-            async () => {
-                try {
-                    await API.deletePlaylist(playlistId);
-                    UI.toast('Playlist deleted', 'success');
-                    State.playlists.selectedId = null;
-                    State.playlists.songs = [];
-                    goBackFromPlaylistDetail();
-                    loadMyPlaylists();
-                } catch (err) {
-                    UI.toast(err.message, 'error');
-                }
-            }
-        );
+    const confirmed = await openConfirmAction({
+        title: 'Delete Playlist',
+        message: 'All songs will be removed from this playlist. This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+    });
+    if (!confirmed) return;
+
+    try {
+        await API.deletePlaylist(playlistId);
+        UI.toast('Playlist deleted', 'success');
+        State.playlists.selectedId = null;
+        State.playlists.songs = [];
+        goBackFromPlaylistDetail();
+        loadMyPlaylists();
+    } catch (err) {
+        UI.toast(err.message, 'error');
     }
 }
 
@@ -684,6 +684,7 @@ async function removeSongFromSelectedPlaylist(downloadId) {
         await API.removeSongFromPlaylist(playlistId, downloadId);
         State.playlists.songs = State.playlists.songs.filter(s => s.id !== downloadId);
         renderPlaylistDetailSongs(State.playlists.songs, true);
+        bumpPlaylistSongCount(playlistId, -1);
         prunePlaybackQueueAfterDelete?.(downloadId);
         updatePlaylistPlaybackControls();
         UI.toast('Song removed', 'success');

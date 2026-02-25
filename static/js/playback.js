@@ -19,9 +19,19 @@ function _preloadNextTrack() {
     const queue = State.playback.queue;
     if (!Array.isArray(queue) || queue.length < 2) return;
 
-    let nextIdx = Player.shuffle ? -1 : currentPlayIndex + 1;
-    if (nextIdx >= queue.length) nextIdx = Player.repeat === 'all' ? 0 : -1;
-    if (nextIdx < 0) return;
+    let nextIdx;
+    if (Player.shuffle) {
+        // Peek at a likely next shuffle candidate without consuming it
+        if (Array.isArray(shuffleRemainingIndices) && shuffleRemainingIndices.length > 0) {
+            nextIdx = shuffleRemainingIndices[0];
+        } else {
+            return;
+        }
+    } else {
+        nextIdx = currentPlayIndex + 1;
+        if (nextIdx >= queue.length) nextIdx = Player.repeat === 'all' ? 0 : -1;
+    }
+    if (nextIdx < 0 || nextIdx >= queue.length) return;
 
     const next = queue[nextIdx];
     if (!next || !next.filename) return;
@@ -293,6 +303,33 @@ function playTrackAtIndex(index) {
     const safeIndex = Number(index);
     if (!Number.isFinite(safeIndex)) return;
     playFromCurrentQueue(safeIndex);
+}
+
+/**
+ * Refresh the library playback queue after new songs are downloaded.
+ * Preserves the currently playing track and shuffle state.
+ */
+function refreshLibraryQueue() {
+    if (State.playback.source !== 'library') return;
+    const currentTrack = (currentPlayIndex >= 0 && Array.isArray(State.playback.queue))
+        ? State.playback.queue[currentPlayIndex]
+        : null;
+
+    const newQueue = buildLibraryPlaybackQueue();
+    if (!newQueue.length) return;
+
+    State.playback.queue = newQueue;
+
+    // Re-find the current track in the updated queue
+    if (currentTrack?.filename) {
+        const newIdx = newQueue.findIndex(t => t.filename === currentTrack.filename);
+        if (newIdx !== -1) {
+            currentPlayIndex = newIdx;
+        } else {
+            currentPlayIndex = Math.min(currentPlayIndex, newQueue.length - 1);
+        }
+    }
+    resetShuffleRemainingIndices(currentPlayIndex);
 }
 
 // Make it globally accessible for Player

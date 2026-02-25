@@ -18,6 +18,10 @@ async function loadHistory() {
             State.downloads.length
         );
         updateLibrary();
+        // Keep the playback queue in sync with the latest library
+        if (typeof refreshLibraryQueue === 'function') {
+            refreshLibraryQueue();
+        }
     } catch (error) {
         console.error('Failed to load history:', error);
     }

@@ -1288,12 +1288,7 @@
         }
         updateSafeAreas();
         
-        // Keep mobile nav in sync with current view
-        const originalShowView = window.showView;
-        window.showView = function(viewName) {
-            if (originalShowView) originalShowView(viewName);
-            updateMobileNav(viewName);
-        };
+        // Mobile nav sync is handled inside showView() in app.js
     </script>
 </body>
 </html>
