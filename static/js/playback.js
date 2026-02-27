@@ -45,7 +45,10 @@ function _preloadNextTrack() {
     _preloadedUrl = url;
 
     // Fetch without Range header → server returns 200 → SW caches the full file
-    fetch(url, { signal: _preloadAbort.signal }).catch(() => {});
+    // Cancel the response body on the page side — the SW already cached the clone
+    fetch(url, { signal: _preloadAbort.signal })
+        .then(r => { r.body?.cancel(); })
+        .catch(() => {});
 }
 
 function resetShuffleRemainingIndices(excludeIndex = null) {

@@ -194,16 +194,22 @@ async function handleAudioFetch(request) {
     // 1. Try cache — instant replay
     const cached = await cache.match(cacheKey);
     if (cached) {
+        // Clone for LRU touch BEFORE the body is consumed by return/slicing
+        const touchClone = cached.clone();
+
         if (rangeHeader) {
             try {
-                return await serveRangeFromCache(cached, rangeHeader);
+                const rangeResponse = await serveRangeFromCache(cached, rangeHeader);
+                // LRU touch — keep actively-played tracks from being evicted
+                cache.delete(cacheKey).then(() => cache.put(cacheKey, touchClone)).catch(() => {});
+                return rangeResponse;
             } catch {
                 // Corrupted entry — evict and fall through to network
                 await cache.delete(cacheKey);
             }
         } else {
             // LRU touch: re-insert to move to end of insertion order
-            cache.delete(cacheKey).then(() => cache.put(cacheKey, cached.clone())).catch(() => {});
+            cache.delete(cacheKey).then(() => cache.put(cacheKey, touchClone)).catch(() => {});
             return cached;
         }
     }
