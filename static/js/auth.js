@@ -10,6 +10,9 @@ function applyRoleUI() {
     const isLoggedIn = !!State.user;
     const isAdmin = isLoggedIn && State.user.role === 'admin';
 
+    // Toggle logged-out class on body for layout resets
+    document.body.classList.toggle('logged-out', !isLoggedIn);
+
     // Toggle app chrome visibility
     document.querySelectorAll('.sidebar, .mobile-nav, .mobile-header').forEach(el => {
         el.classList.toggle('hidden', !isLoggedIn);
