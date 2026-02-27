@@ -1,29 +1,31 @@
-# Zora
+# 🎵 Zora
 
-Zora is a high-quality YouTube/YouTube Music audio downloader with:
-- a modern Flask web app
-- a CLI mode
-- queue + playlist support
-- library/history management with thumbnails
-- dynamic storage configuration
+**A self-hosted music streaming app powered by YouTube.**
 
-## What You Get
+Zora lets you build your own personal music library and stream it from anywhere — with a modern web UI, playlists, lock screen controls, and more.
 
-- High-quality audio downloads via `yt-dlp` + `ffmpeg`
-- Single track and playlist downloads
-- Library view with play support
-- Persistent history in SQLite
-- Duplicate detection
-- Dynamic download folder selection:
-  - `ZORA_DOWNLOAD_DIR` env var
-  - settings value (`download_dir`)
-  - fallback `./downloads`
+> **Try Zora live →** [www.zora.crackery.in](https://www.zora.crackery.in)
+
+## Features
+
+- 🎧 Stream high-quality audio in-browser with full playback controls
+- 📱 Lock screen & notification controls (Media Session API)
+- 🎨 Modern, responsive UI — works on desktop and mobile
+- 📋 Playlist creation and management
+- 🔀 Shuffle, repeat, sleep timer, gesture controls
+- 🔍 Search YouTube directly from the app
+- 📚 Persistent library with thumbnails and metadata
+- 🔐 User authentication with role-based access (admin/user)
+- 🧠 Smart duplicate detection
+- ⚡ Range-request streaming for instant seek & low-latency playback
+- 🌐 PWA support — installable on mobile
+- 🖥️ CLI mode for bulk library management
 
 ## Requirements
 
 - Python 3.8+
 - `ffmpeg` (required)
-- Internet connection (for YouTube metadata/download)
+- Internet connection (for YouTube metadata)
 
 Install `ffmpeg`:
 
@@ -44,174 +46,115 @@ Install `ffmpeg`:
   choco install ffmpeg
   ```
 
-## Where To Run Commands
+## Quick Start
 
-Run all setup/run commands from the project root (the folder that contains `run.py`).
+Run all commands from the project root (the folder containing `run.py`).
 
-Example:
-```bash
-cd /path/to/zora
-```
+1. **Create and activate virtual environment**
 
-## Installation
+   - macOS/Linux:
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
+   - Windows (PowerShell):
+     ```powershell
+     python -m venv venv
+     .\venv\Scripts\Activate.ps1
+     ```
 
-1. Create and activate virtual environment
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-- macOS/Linux:
-  ```bash
-  python3 -m venv venv
-  source venv/bin/activate
-  ```
-- Windows (PowerShell):
-  ```powershell
-  python -m venv venv
-  .\venv\Scripts\Activate.ps1
-  ```
+3. **Start the server**
+   ```bash
+   python run.py
+   ```
 
-2. Install Python dependencies
-```bash
-pip install -r requirements.txt
-```
-
-## Run The Web App
-
-Start server:
-```bash
-python run.py
-```
-
-Open:
-```text
-http://localhost:5001
-```
-
-Default bind:
-- Host: `0.0.0.0`
-- Port: `5001`
-
-## Run The CLI
-
-Basic:
-```bash
-python main.py "https://www.youtube.com/watch?v=VIDEO_ID"
-```
-
-Playlist:
-```bash
-python main.py "https://youtube.com/playlist?list=PLAYLIST_ID"
-```
-
-Custom format/quality/output:
-```bash
-python main.py "https://music.youtube.com/watch?v=VIDEO_ID" --format mp3 --quality 320 --output ./my-music
-```
+4. **Open in your browser**
+   ```
+   http://localhost:5001
+   ```
 
 ## Configuration
 
-You can configure with environment variables and/or settings API/UI.
+Configure via environment variables or the Admin Settings UI.
 
-### Important Environment Variables
+### Environment Variables
 
-- `ZORA_HOST` (default: `0.0.0.0`)
-- `ZORA_PORT` (default: `5001`)
-- `ZORA_DOWNLOAD_DIR` (highest-priority download folder override)
-- `ZORA_PLAYLIST_PREVIEW_LIMIT` (default: `120`, max: `500`)
-- `SECRET_KEY`
+| Variable | Default | Description |
+|---|---|---|
+| `ZORA_HOST` | `0.0.0.0` | Bind address |
+| `ZORA_PORT` | `5001` | Server port |
+| `ZORA_DOWNLOAD_DIR` | `./downloads` | Music storage directory |
+| `ZORA_PLAYLIST_PREVIEW_LIMIT` | `120` | Max songs to preview from a YouTube playlist (20–500) |
+| `SECRET_KEY` | auto-generated | Flask secret key |
 
 Optional `.env` example:
 ```env
 ZORA_HOST=0.0.0.0
 ZORA_PORT=5001
 ZORA_DOWNLOAD_DIR=/absolute/path/to/music
-ZORA_PLAYLIST_PREVIEW_LIMIT=120
 SECRET_KEY=change-this
 ```
 
-### YouTube Mix (`list=RD...`) Support
-
-- Mix links are supported in playlist mode.
-- To keep Termux responsive, playlist preview loads only the first N items.
-- You can tune this from Admin Settings (`Playlist Preview Cap`) or via `ZORA_PLAYLIST_PREVIEW_LIMIT`.
-
-### Download Folder Resolution (Priority)
+### Music Storage Resolution (Priority)
 
 1. `ZORA_DOWNLOAD_DIR` environment variable
-2. Saved settings key `download_dir`
+2. Admin Settings → `download_dir`
 3. Default `./downloads`
-
-## Data and Storage
-
-- SQLite DB: `data.db`
-- Downloaded audio: dynamic directory (see priority above)
-- Thumbnails: `<download_dir>/thumbnails`
-
-## API Endpoints (Core)
-
-- `GET /api/settings`
-- `POST /api/settings`
-- `POST /api/info`
-- `POST /api/download`
-- `GET /api/status/<job_id>`
-- `GET /api/history`
-- `GET /play/<filename>`
 
 ## Project Structure
 
-- `app/` - backend logic
-  - `routes/` - API routes
-  - `models/` - DB models
-  - `services/` - queue/youtube services
-- `docs/` - architecture and implementation specs
-- `templates/` - HTML templates
-- `static/` - JS/CSS/assets
-- `run.py` - web app entry point
-- `main.py` - CLI entry point
-- `requirements.txt` - Python dependencies
+```
+app/            Backend logic
+├── routes/     API routes
+├── models/     Database models
+├── services/   YouTube & queue services
+templates/      HTML templates
+static/         JS, CSS, assets
+docs/           Architecture specs
+run.py          Web app entry point
+main.py         CLI entry point
+```
 
-## Planning Docs
+## API Endpoints
 
-- Auth + roles implementation spec: `docs/auth-rbac-spec.md`
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/settings` | Get app settings |
+| `POST` | `/api/settings` | Update settings (admin) |
+| `POST` | `/api/info` | Fetch YouTube metadata |
+| `POST` | `/api/download` | Add music to library (admin) |
+| `GET` | `/api/status/<job_id>` | Download job status |
+| `GET` | `/api/history` | Get music library |
+| `GET` | `/play/<filename>` | Stream audio |
 
 ## Troubleshooting
 
-- `No module named yt_dlp` or Flask errors:
-  - activate your venv
-  - run `pip install -r requirements.txt`
+- **`No module named yt_dlp`** — activate your venv, then `pip install -r requirements.txt`
+- **`FFmpeg not found`** — install ffmpeg, verify with `ffmpeg -version`
+- **App not reachable** — confirm `python run.py` is running, check port `5001`
+- **Audio won't play** — keep default format as `m4a`, ensure ffmpeg is installed
 
-- `FFmpeg not found`:
-  - install `ffmpeg`
-  - verify with `ffmpeg -version`
+## Development
 
-- App not reachable:
-  - confirm `python run.py` is running
-  - open `http://localhost:5001`
-  - check port conflicts and firewall
+```bash
+# Syntax check
+python -m compileall app
 
-- “Audio format not supported”:
-  - keep default format as `m4a`
-  - ensure `ffmpeg` is installed
-  - refresh library via UI (history sync repairs stale mappings)
+# Backend tests
+./venv/bin/python -m pytest -q
 
-## Development Notes
+# UI tests (Playwright)
+npm install && npx playwright install chromium
+npm run test:ui
 
-- Bytecode check:
-  ```bash
-  python -m compileall app
-  ```
-- Backend tests:
-  ```bash
-  ./venv/bin/python -m pytest -q
-  ```
-- UI tests (Playwright):
-  ```bash
-  npm install
-  npx playwright install chromium
-  npm run test:ui
-  ```
-- Run all tests:
-  ```bash
-  npm run test:all
-  ```
+# All tests
+npm run test:all
+```
 
 ## License
 

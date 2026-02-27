@@ -21,6 +21,7 @@ const Player = {
     _userPaused: false,
     _wasPlayingBeforeHidden: false,
     _bgResumeTimer: null,
+    _mediaSessionTriggered: false,
 
     // Playback modes
     shuffle: false,
@@ -96,9 +97,9 @@ const Player = {
             this.updateProgress();
             this.updateNowPlayingProgress();
             this.maybeSavePlaybackState();
-            // Update lock screen scrubber (throttled to every 5s)
+            // Update lock screen scrubber (throttled to every 1s)
             const now = Date.now();
-            if (now - this._lastPositionUpdate > 5000) {
+            if (now - this._lastPositionUpdate > 1000) {
                 this._lastPositionUpdate = now;
                 this.updateMediaSessionPosition();
             }
@@ -113,6 +114,7 @@ const Player = {
             this.updateDuration();
             this.syncNowPlayingUI();
             this.isReady = true;
+            this.updateMediaSessionMetadata();
             this.updateMediaSessionPosition();
         });
 
@@ -197,10 +199,14 @@ const Player = {
         });
 
         ms.setActionHandler('nexttrack', () => {
+            this._userPaused = false;
+            this._mediaSessionTriggered = true;
             this.playNext();
         });
 
         ms.setActionHandler('previoustrack', () => {
+            this._userPaused = false;
+            this._mediaSessionTriggered = true;
             this.playPrevious();
         });
 
@@ -208,6 +214,7 @@ const Player = {
             ms.setActionHandler('seekto', (details) => {
                 if (this.audio && Number.isFinite(details.seekTime)) {
                     this.audio.currentTime = details.seekTime;
+                    this.updateMediaSessionPosition();
                 }
             });
         } catch (e) { /* unsupported on some browsers */ }
@@ -215,12 +222,14 @@ const Player = {
         try {
             ms.setActionHandler('seekbackward', (details) => {
                 this.skipBackward(details.seekOffset || 10);
+                this.updateMediaSessionPosition();
             });
         } catch (e) { /* unsupported */ }
 
         try {
             ms.setActionHandler('seekforward', (details) => {
                 this.skipForward(details.seekOffset || 10);
+                this.updateMediaSessionPosition();
             });
         } catch (e) { /* unsupported */ }
     },
@@ -250,7 +259,7 @@ const Player = {
      */
     updateMediaSessionPosition() {
         if (!('mediaSession' in navigator)) return;
-        if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+        if (!this.audio || !Number.isFinite(this.audio.duration) || this.audio.duration <= 0) return;
 
         try {
             navigator.mediaSession.setPositionState({
@@ -418,10 +427,46 @@ const Player = {
                 .then(() => {
                     console.log('▶️ Playing:', title || filename);
                     this.setLoading(false);
+                    this._mediaSessionTriggered = false;
                 })
                 .catch((error) => {
-                    this.handlePlayError(error, title);
+                    if (error.name === 'AbortError' || error.name === 'NotAllowedError') {
+                        this._retryPlayOnCanPlay(title);
+                    } else {
+                        this._mediaSessionTriggered = false;
+                        this.handlePlayError(error, title);
+                    }
                 });
+        }
+    },
+
+    /**
+     * Retry playback once audio is ready (handles AbortError from rapid skips)
+     * @private
+     */
+    _retryPlayOnCanPlay(title) {
+        if (!this.audio) return;
+
+        const retry = () => {
+            this.audio.removeEventListener('canplay', retry);
+            if (this._userPaused) {
+                this._mediaSessionTriggered = false;
+                return;
+            }
+            this.audio.play()
+                .then(() => {
+                    this.setLoading(false);
+                    this._mediaSessionTriggered = false;
+                })
+                .catch(() => {
+                    this._mediaSessionTriggered = false;
+                });
+        };
+
+        if (this.audio.readyState >= 3) {
+            retry();
+        } else {
+            this.audio.addEventListener('canplay', retry, { once: true });
         }
     },
 
@@ -550,21 +595,21 @@ const Player = {
      * Update progress bar and time display
      */
     updateProgress() {
-        if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+        if (!this.audio || !Number.isFinite(this.audio.duration) || this.audio.duration <= 0) return;
+
+        const playerBar = document.getElementById('playerProgressBar');
+        if (playerBar?.classList.contains('dragging')) return;
 
         const percent = (this.audio.currentTime / this.audio.duration) * 100;
-        const playerBar = document.getElementById('playerProgressBar');
-        const isScrubbing = playerBar?.classList.contains('dragging');
 
         const progress = document.getElementById('playerProgress');
-        if (progress && !isScrubbing) {
-            progress.style.width = `${percent}%`;
-        }
+        if (progress) progress.style.width = `${percent}%`;
+
+        const handle = document.getElementById('playerHandle');
+        if (handle) handle.style.left = `${percent}%`;
 
         const timeEl = document.getElementById('playerTime');
-        if (timeEl && !isScrubbing) {
-            timeEl.textContent = this.formatTime(this.audio.currentTime);
-        }
+        if (timeEl) timeEl.textContent = this.formatTime(this.audio.currentTime);
     },
 
     /**
@@ -611,61 +656,62 @@ const Player = {
         const bar = document.getElementById(barId);
         if (!bar) return;
         const fill = document.getElementById(fillId);
-        const handle = document.getElementById(handleId);
+        const handle = handleId ? document.getElementById(handleId) : null;
         const timeEl = timeId ? document.getElementById(timeId) : null;
         let dragging = false;
         let currentPercent = 0;
-        let rafId = null;
-        let pendingPercent = null;
+        let seekRafId = null;
+
+        // Prevent browser scroll/pull-to-refresh while touching the bar
+        bar.style.touchAction = 'none';
 
         const getPercent = (clientX) => {
             const rect = bar.getBoundingClientRect();
+            if (rect.width === 0) return 0;
             return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
         };
 
         const getClientX = (e) => {
             if (typeof e.clientX === 'number') return e.clientX;
-            if (e.touches && e.touches[0]) return e.touches[0].clientX;
-            if (e.changedTouches && e.changedTouches[0]) return e.changedTouches[0].clientX;
+            if (e.touches && e.touches.length > 0) return e.touches[0].clientX;
+            if (e.changedTouches && e.changedTouches.length > 0) return e.changedTouches[0].clientX;
             return null;
         };
 
-        const seekToPercent = (percent) => {
-            if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
-            this.audio.currentTime = percent * this.audio.duration;
-        };
-
-        const scheduleSeek = (percent) => {
-            pendingPercent = percent;
-            if (rafId) return;
-            rafId = requestAnimationFrame(() => {
-                rafId = null;
-                if (pendingPercent == null) return;
-                seekToPercent(pendingPercent);
-                pendingPercent = null;
-            });
+        const hasDuration = () => {
+            return this.audio && Number.isFinite(this.audio.duration) && this.audio.duration > 0;
         };
 
         const updateVisual = (percent) => {
             const pct = `${percent * 100}%`;
             if (fill) fill.style.width = pct;
             if (handle) handle.style.left = pct;
-            if (timeEl && this.audio && !isNaN(this.audio.duration)) {
+            if (timeEl && hasDuration()) {
                 timeEl.textContent = this.formatTime(percent * this.audio.duration);
             }
         };
 
         const commitSeek = (percent) => {
-            if (rafId) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
-                pendingPercent = null;
+            if (seekRafId) {
+                cancelAnimationFrame(seekRafId);
+                seekRafId = null;
             }
-            seekToPercent(percent);
+            if (!hasDuration()) return;
+            this.audio.currentTime = percent * this.audio.duration;
+            this.updateMediaSessionPosition();
+        };
+
+        const scheduleSeek = (percent) => {
+            if (seekRafId) cancelAnimationFrame(seekRafId);
+            seekRafId = requestAnimationFrame(() => {
+                seekRafId = null;
+                if (!hasDuration()) return;
+                this.audio.currentTime = percent * this.audio.duration;
+            });
         };
 
         const onStart = (e) => {
-            if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+            if (!hasDuration()) return;
             e.preventDefault();
             e.stopPropagation();
             dragging = true;
@@ -674,7 +720,6 @@ const Player = {
             if (clientX == null) return;
             currentPercent = getPercent(clientX);
             updateVisual(currentPercent);
-            scheduleSeek(currentPercent);
         };
 
         const onMove = (e) => {
@@ -702,12 +747,11 @@ const Player = {
             if (!dragging) return;
             dragging = false;
             bar.classList.remove('dragging');
-            if (rafId) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
-                pendingPercent = null;
+            if (seekRafId) {
+                cancelAnimationFrame(seekRafId);
+                seekRafId = null;
             }
-            if (this.audio && this.audio.duration && !isNaN(this.audio.duration)) {
+            if (hasDuration()) {
                 const percent = this.audio.currentTime / this.audio.duration;
                 updateVisual(Math.max(0, Math.min(1, percent)));
             }
@@ -1821,17 +1865,18 @@ const Player = {
      * Update Now Playing progress
      */
     updateNowPlayingProgress() {
-        if (!this.audio || isNaN(this.audio.duration)) return;
+        if (!this.audio || !Number.isFinite(this.audio.duration) || this.audio.duration <= 0) return;
+
+        const progressBar = document.getElementById('nowPlayingProgressBar');
+        if (progressBar?.classList.contains('dragging')) return;
 
         const percent = (this.audio.currentTime / this.audio.duration) * 100;
-        const progressBar = document.getElementById('nowPlayingProgressBar');
-        const isScrubbing = progressBar?.classList.contains('dragging');
 
         const fill = document.getElementById('nowPlayingProgress');
-        if (fill && !isScrubbing) fill.style.width = `${percent}%`;
+        if (fill) fill.style.width = `${percent}%`;
 
         const timeEl = document.getElementById('nowPlayingTime');
-        if (timeEl && !isScrubbing) timeEl.textContent = this.formatTime(this.audio.currentTime);
+        if (timeEl) timeEl.textContent = this.formatTime(this.audio.currentTime);
 
         const durationEl = document.getElementById('nowPlayingDuration');
         if (durationEl) durationEl.textContent = this.formatTime(this.audio.duration);
@@ -1841,7 +1886,7 @@ const Player = {
      * Seek from Now Playing progress bar
      */
     seekFromNowPlaying(event) {
-        if (!this.audio || !this.audio.duration || isNaN(this.audio.duration)) return;
+        if (!this.audio || !Number.isFinite(this.audio.duration) || this.audio.duration <= 0) return;
 
         const bar = document.getElementById('nowPlayingProgressBar');
         if (!bar) return;

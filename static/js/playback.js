@@ -272,6 +272,9 @@ function playPreviousTrack() {
     const elapsed = Player.getCurrentTime?.() || 0;
     if (elapsed > 3 && Player.audio) {
         Player.audio.currentTime = 0;
+        if (Player.audio.paused && !Player._userPaused) {
+            Player.audio.play().catch(() => {});
+        }
         return;
     }
 
@@ -283,7 +286,12 @@ function playPreviousTrack() {
             previousIndex = shuffleHistory.pop();
         } else {
             // No history — restart current track
-            if (Player.audio) Player.audio.currentTime = 0;
+            if (Player.audio) {
+                Player.audio.currentTime = 0;
+                if (Player.audio.paused && !Player._userPaused) {
+                    Player.audio.play().catch(() => {});
+                }
+            }
             return;
         }
     } else {
@@ -292,7 +300,12 @@ function playPreviousTrack() {
             if (Player.repeat === 'all') {
                 previousIndex = queue.length - 1;
             } else {
-                if (Player.audio) Player.audio.currentTime = 0;
+                if (Player.audio) {
+                    Player.audio.currentTime = 0;
+                    if (Player.audio.paused && !Player._userPaused) {
+                        Player.audio.play().catch(() => {});
+                    }
+                }
                 return;
             }
         }
