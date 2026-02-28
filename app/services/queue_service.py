@@ -6,6 +6,7 @@ import os
 import threading
 import uuid
 from datetime import datetime, timedelta
+from flask import current_app
 from app.storage_paths import get_download_dir
 from app.download_preferences import get_default_download_preferences
 
@@ -111,7 +112,11 @@ class QueueService:
             position = len(self.queue)
         
         # Start processing if not already running
-        self._start_processing()
+        try:
+            app = current_app._get_current_object()
+        except RuntimeError:
+            app = None
+        self._start_processing(app)
         
         return {'queue_item': item, 'position': position}
     
@@ -183,20 +188,17 @@ class QueueService:
         """Update download status."""
         self._patch_active_download(job_id, **kwargs)
     
-    def _start_processing(self):
+    def _start_processing(self, app=None):
         """Start queue processing thread."""
         if not self.is_processing:
             self.is_processing = True
-            thread = threading.Thread(target=self._process_queue, daemon=True)
+            thread = threading.Thread(target=self._process_queue, args=(app,), daemon=True)
             thread.start()
     
-    def _process_queue(self):
+    def _process_queue(self, app=None):
         """Process queue items sequentially."""
-        from app import create_app
         from app.downloader import YTMusicDownloader
         from app.models import Download
-
-        app = create_app()
         
         while True:
             with self.queue_lock:

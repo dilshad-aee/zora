@@ -7,7 +7,7 @@ import re
 import threading
 from datetime import datetime
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 from flask_login import current_user
 from sqlalchemy import func
 
@@ -141,9 +141,10 @@ def start_download():
 
     job_id = queue_service.create_download(url, audio_format, quality)
 
+    app = current_app._get_current_object()
     thread = threading.Thread(
         target=_background_download,
-        args=(job_id, url, audio_format, quality, info),
+        args=(app, job_id, url, audio_format, quality, info),
         daemon=True
     )
     thread.start()
@@ -151,15 +152,12 @@ def start_download():
     return jsonify({'job_id': job_id})
 
 
-def _background_download(job_id: str, url: str, audio_format: str, quality: str, info: dict = None):
+def _background_download(app, job_id: str, url: str, audio_format: str, quality: str, info: dict = None):
     """Background download task."""
     print(f"[JOB:{job_id}] Starting background download for {url}", flush=True)
 
-    from app import create_app
     from app.downloader import YTMusicDownloader
     from app.models import Download
-
-    app = create_app()
 
     queue_service.update_download(job_id,
         started_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -346,9 +344,10 @@ def start_playlist_download():
     session['playlist_id'] = None
     session['owner_user_id'] = current_user.id
 
+    app = current_app._get_current_object()
     thread = threading.Thread(
         target=_background_playlist_download,
-        args=(session_id,),
+        args=(app, session_id),
         daemon=True
     )
     thread.start()
@@ -370,9 +369,8 @@ def get_playlist_download_status(session_id):
     return jsonify(session)
 
 
-def _background_playlist_download(session_id):
+def _background_playlist_download(app, session_id):
     """Download playlist songs sequentially with status updates."""
-    from app import create_app
     from app.services.playlist_download_service import playlist_download_service
     from app.downloader import YTMusicDownloader
     from app.models import db, Download, Playlist
@@ -384,7 +382,6 @@ def _background_playlist_download(session_id):
     print(f"[PLAYLIST:{session_id}] Starting download of {session['total']} songs", flush=True)
 
     default_format, default_quality = get_default_download_preferences()
-    app = create_app()
     playlist_id = None
 
     if session.get('create_playlist'):
