@@ -261,15 +261,274 @@ function debounceAdminUserSearch() {
     _adminUserSearchTimer = setTimeout(() => loadAdminUsers(1), 300);
 }
 
+let _serverStatusPollInterval = null;
+
 function switchAdminTab(tab) {
     document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     document.getElementById('adminUsersPanel')?.classList.toggle('hidden', tab !== 'users');
     document.getElementById('adminAuditPanel')?.classList.toggle('hidden', tab !== 'audit');
     document.getElementById('adminCategoriesPanel')?.classList.toggle('hidden', tab !== 'categories');
+    document.getElementById('adminServerPanel')?.classList.toggle('hidden', tab !== 'server');
+
+    // Stop server polling when leaving the tab
+    if (tab !== 'server' && _serverStatusPollInterval) {
+        clearInterval(_serverStatusPollInterval);
+        _serverStatusPollInterval = null;
+    }
 
     if (tab === 'users') loadAdminUsers(1);
     else if (tab === 'audit') loadAuditLogs(1);
     else if (tab === 'categories') loadAdminCategories();
+    else if (tab === 'server') startServerStatusPolling();
+}
+
+function startServerStatusPolling() {
+    loadServerStatus();
+    if (_serverStatusPollInterval) clearInterval(_serverStatusPollInterval);
+    _serverStatusPollInterval = setInterval(loadServerStatus, 5000);
+}
+
+async function loadServerStatus() {
+    try {
+        const data = await API.admin.getServerStatus();
+        renderServerStatus(data);
+    } catch (error) {
+        console.error('Failed to load server status:', error);
+    }
+}
+
+function _statusColor(percent) {
+    if (percent >= 90) return '#e74c3c';
+    if (percent >= 70) return '#f39c12';
+    return '#2ecc71';
+}
+
+function _formatBytes(mb) {
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${mb} MB`;
+}
+
+function renderServerStatus(data) {
+    const grid = document.getElementById('serverStatusGrid');
+    if (!grid) return;
+
+    let cards = '';
+
+    // ── Uptime Card ──
+    if (data.uptime) {
+        cards += `
+            <div class="server-card server-card--wide">
+                <div class="server-card__icon"><i class="fas fa-clock"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Uptime</div>
+                    <div class="server-card__value">${data.uptime.formatted}</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Platform Card ──
+    if (data.platform) {
+        cards += `
+            <div class="server-card server-card--wide">
+                <div class="server-card__icon"><i class="fas fa-microchip"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Platform</div>
+                    <div class="server-card__value">${data.platform.os} ${data.platform.arch}</div>
+                    <div class="server-card__sub">Python ${data.platform.python} · ${UI.escapeHtml(data.platform.hostname)}</div>
+                </div>
+            </div>`;
+    }
+
+    // ── CPU Card ──
+    if (data.cpu) {
+        const cpuColor = _statusColor(data.cpu.percent);
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon" style="color:${cpuColor}"><i class="fas fa-tachometer-alt"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">CPU Usage</div>
+                    <div class="server-card__value" style="color:${cpuColor}">${data.cpu.percent}%</div>
+                    <div class="server-card__bar">
+                        <div class="server-card__bar-fill" style="width:${data.cpu.percent}%;background:${cpuColor}"></div>
+                    </div>
+                    <div class="server-card__sub">${data.cpu.cores_logical} cores${data.cpu.frequency_mhz ? ' · ' + data.cpu.frequency_mhz + ' MHz' : ''}</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Memory Card ──
+    if (data.memory) {
+        const memColor = _statusColor(data.memory.percent);
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon" style="color:${memColor}"><i class="fas fa-memory"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Memory</div>
+                    <div class="server-card__value" style="color:${memColor}">${data.memory.percent}%</div>
+                    <div class="server-card__bar">
+                        <div class="server-card__bar-fill" style="width:${data.memory.percent}%;background:${memColor}"></div>
+                    </div>
+                    <div class="server-card__sub">${_formatBytes(data.memory.used_mb)} / ${_formatBytes(data.memory.total_mb)}</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Disk Card ──
+    if (data.disk) {
+        const diskColor = _statusColor(data.disk.percent);
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon" style="color:${diskColor}"><i class="fas fa-hdd"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Disk Storage</div>
+                    <div class="server-card__value" style="color:${diskColor}">${data.disk.percent}%</div>
+                    <div class="server-card__bar">
+                        <div class="server-card__bar-fill" style="width:${data.disk.percent}%;background:${diskColor}"></div>
+                    </div>
+                    <div class="server-card__sub">${data.disk.used_gb} GB / ${data.disk.total_gb} GB · ${data.disk.free_gb} GB free</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Network Card ──
+    if (data.network) {
+        let netDetails = `↑ ${_formatBytes(data.network.bytes_sent_mb)} · ↓ ${_formatBytes(data.network.bytes_recv_mb)}`;
+        if (data.network.active_connections != null) {
+            netDetails += ` · ${data.network.active_connections} connections`;
+        }
+        let ifaceHtml = '';
+        if (data.network.interfaces && data.network.interfaces.length) {
+            ifaceHtml = '<div class="server-card__interfaces">' +
+                data.network.interfaces.map(i =>
+                    `<span class="server-iface"><i class="fas fa-ethernet"></i> ${UI.escapeHtml(i.name)}: <strong>${UI.escapeHtml(i.ip)}</strong></span>`
+                ).join('') + '</div>';
+        }
+        cards += `
+            <div class="server-card server-card--wide">
+                <div class="server-card__icon"><i class="fas fa-network-wired"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Network I/O</div>
+                    <div class="server-card__value-sm">${netDetails}</div>
+                    ${ifaceHtml}
+                </div>
+            </div>`;
+    }
+
+    // ── Process Card ──
+    if (data.process) {
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon"><i class="fas fa-cogs"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Zora Process</div>
+                    <div class="server-card__value-sm">PID ${data.process.pid}</div>
+                    <div class="server-card__sub">
+                        RAM: ${data.process.memory_rss_mb || '?'} MB · 
+                        Threads: ${data.process.threads || '?'}${data.process.open_files != null ? ' · Files: ' + data.process.open_files : ''}
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    // ── Library Card ──
+    if (data.library) {
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon"><i class="fas fa-music"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Library</div>
+                    <div class="server-card__value">${data.library.total_songs}</div>
+                    <div class="server-card__sub">
+                        ${_formatBytes(data.library.total_size_mb)} on disk · 
+                        ${data.library.files_on_disk} files · 
+                        DB: ${data.library.db_size_mb} MB
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    // ── Queue Card ──
+    if (data.queue) {
+        const qActive = data.queue.active || 0;
+        const qQueued = data.queue.queued || 0;
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon"><i class="fas fa-download"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Download Queue</div>
+                    <div class="server-card__value">${qActive} active</div>
+                    <div class="server-card__sub">${qQueued} queued</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Users Card ──
+    if (data.library) {
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon"><i class="fas fa-users"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Users</div>
+                    <div class="server-card__value">${data.library.total_users}</div>
+                    <div class="server-card__sub">registered accounts</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Load Average Card ──
+    if (data.load_average) {
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon"><i class="fas fa-chart-line"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Load Average</div>
+                    <div class="server-card__value-sm">${data.load_average.load_1m} / ${data.load_average.load_5m} / ${data.load_average.load_15m}</div>
+                    <div class="server-card__sub">1 min / 5 min / 15 min</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Temperature Card ──
+    if (data.temperature) {
+        const tempColor = data.temperature.current_c >= 80 ? '#e74c3c' :
+            data.temperature.current_c >= 60 ? '#f39c12' : '#2ecc71';
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon" style="color:${tempColor}"><i class="fas fa-thermometer-half"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Temperature</div>
+                    <div class="server-card__value" style="color:${tempColor}">${data.temperature.current_c}°C</div>
+                    <div class="server-card__sub">${UI.escapeHtml(data.temperature.label)}${data.temperature.high_c ? ' · High: ' + data.temperature.high_c + '°C' : ''}</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Server Time ──
+    if (data.server_time) {
+        const st = new Date(data.server_time);
+        cards += `
+            <div class="server-card">
+                <div class="server-card__icon"><i class="fas fa-calendar-alt"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Server Time</div>
+                    <div class="server-card__value-sm">${st.toLocaleString()}</div>
+                </div>
+            </div>`;
+    }
+
+    // ── psutil warning ──
+    if (!data.has_psutil) {
+        cards += `
+            <div class="server-card server-card--wide server-card--warn">
+                <div class="server-card__icon"><i class="fas fa-exclamation-triangle"></i></div>
+                <div class="server-card__body">
+                    <div class="server-card__label">Limited Metrics</div>
+                    <div class="server-card__sub">Install <code>psutil</code> for CPU, memory, network, and temperature data:<br><code>pip install psutil</code></div>
+                </div>
+            </div>`;
+    }
+
+    grid.innerHTML = cards;
 }
 
 async function loadAdminUsers(page = 1) {

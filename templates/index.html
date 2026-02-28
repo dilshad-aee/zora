@@ -679,6 +679,9 @@
                     <button class="admin-tab" data-tab="audit" onclick="switchAdminTab('audit')">
                         <i class="fas fa-clipboard-list"></i> Audit Logs
                     </button>
+                    <button class="admin-tab" data-tab="server" onclick="switchAdminTab('server')">
+                        <i class="fas fa-server"></i> Server
+                    </button>
                 </div>
 
                 <!-- Users Tab -->
@@ -769,6 +772,22 @@
                             <i class="fas fa-tags"></i>
                             <h3>No categories</h3>
                             <p>Create categories for users to organize playlists</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Server Status Tab -->
+                <div class="admin-panel hidden" id="adminServerPanel">
+                    <div class="admin-toolbar">
+                        <h3><i class="fas fa-heartbeat"></i> Server Status</h3>
+                        <button class="btn btn--secondary btn--small" onclick="loadServerStatus()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="server-status-grid" id="serverStatusGrid">
+                        <div class="server-status-loading">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Loading server status...</p>
                         </div>
                     </div>
                 </div>

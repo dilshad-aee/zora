@@ -381,6 +381,13 @@ const API = {
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Failed to fetch audit logs');
             return data;
+        },
+
+        async getServerStatus() {
+            const response = await API._fetch('/api/admin/server-status');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to fetch server status');
+            return data;
         }
     },
 

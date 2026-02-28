@@ -6096,6 +6096,173 @@ audio {
 }
 
 /* === Responsive === */
+
+/* === Server Status Dashboard === */
+.server-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+    margin-top: 1rem;
+}
+
+.server-status-loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
+.server-status-loading i {
+    font-size: 1.5rem;
+    margin-bottom: 0.8rem;
+    display: block;
+    color: var(--accent);
+}
+
+.server-card {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.server-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 16px rgba(108, 92, 231, 0.08);
+}
+
+.server-card--wide {
+    grid-column: span 2;
+}
+
+.server-card--warn {
+    border-color: #f39c12;
+    background: rgba(243, 156, 18, 0.06);
+}
+
+.server-card__icon {
+    font-size: 1.4rem;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: rgba(108, 92, 231, 0.1);
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.server-card--warn .server-card__icon {
+    background: rgba(243, 156, 18, 0.12);
+    color: #f39c12;
+}
+
+.server-card__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.server-card__label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.server-card__value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.server-card__value-sm {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+}
+
+.server-card__sub {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+.server-card__sub code {
+    background: var(--hover);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.server-card__bar {
+    height: 6px;
+    background: var(--hover);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 8px 0 4px;
+}
+
+.server-card__bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.6s ease, background 0.4s ease;
+}
+
+.server-card__interfaces {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.server-iface {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    background: var(--hover);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.server-iface i {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.server-iface strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
+@media (max-width: 680px) {
+    .server-status-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .server-card--wide {
+        grid-column: span 1;
+    }
+
+    .server-card__value {
+        font-size: 1.3rem;
+    }
+}
+
+
 @media (max-width: 680px) {
     .playlist-grid {
         grid-template-columns: 1fr 1fr;
