@@ -512,6 +512,7 @@ function showView(viewName) {
         'library': 'library',
         'playlists': 'playlists',
         'playlist-downloads': 'playlist-downloads',
+        'import': 'import',
         'admin': 'admin',
         'profile': 'profile'
     };
@@ -545,6 +546,9 @@ function showView(viewName) {
     } else if (viewName === 'profile') {
         document.getElementById('profileView')?.classList.remove('hidden');
         loadProfile();
+    } else if (viewName === 'import') {
+        document.getElementById('importView')?.classList.remove('hidden');
+        if (typeof loadImportView === 'function') loadImportView();
     } else if (viewName === 'admin') {
         document.getElementById('adminView')?.classList.remove('hidden');
         loadAdminUsers(1);

@@ -84,6 +84,10 @@
                     <i class="fas fa-download"></i>
                     <span>Playlist Downloads</span>
                 </a>
+                <a class="nav-link" data-view="import" data-role="admin" onclick="showView('import'); closeSidebar();">
+                    <i class="fab fa-spotify"></i>
+                    <span>Import</span>
+                </a>
                 <a class="nav-link" data-view="admin" data-role="admin" onclick="showView('admin'); closeSidebar();">
                     <i class="fas fa-shield-alt"></i>
                     <span>Admin</span>
@@ -293,9 +297,12 @@
                         <p class="search-hint" id="searchHint">
                             <i class="fas fa-info-circle"></i>
                             Supports: youtube.com, youtu.be, music.youtube.com
+
                         </p>
                     </div>
                 </div>
+
+
                 
                 <!-- Search Results -->
                 <div class="results-section hidden" id="resultsSection">
@@ -792,6 +799,104 @@
                     </div>
                 </div>
             </div>
+
+            <!-- IMPORT VIEW -->
+            <div class="view hidden" id="importView">
+                <h1 class="page-title">
+                    <i class="fab fa-spotify"></i> Import from Spotify
+                </h1>
+                <p class="page-subtitle">Import your Spotify playlists into Zora. Admin only.</p>
+
+                <!-- Import Form -->
+                <div class="import-form-card">
+                    <div class="import-form-card__inner">
+                        <div class="import-form-card__icon">
+                            <i class="fab fa-spotify"></i>
+                        </div>
+                        <div class="import-form-card__input-wrap">
+                            <input type="text"
+                                   id="importUrlInput"
+                                   class="form-input import-form-card__input"
+                                   placeholder="Paste Spotify playlist URL..."
+                                   autocomplete="off"
+                                   autocorrect="off"
+                                   spellcheck="false"
+                                   onkeypress="if(event.key==='Enter') startImport()">
+                            <button class="btn btn--primary import-form-card__btn" id="importStartBtn" onclick="startImport()">
+                                <i class="fas fa-arrow-right"></i>
+                                <span>Import</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="import-error hidden" id="importError"></div>
+                </div>
+
+                <!-- Active Import Progress -->
+                <div class="import-active hidden" id="importActive">
+                    <div class="import-active__header">
+                        <div class="import-active__label">
+                            <i class="fas fa-compact-disc fa-spin"></i>
+                            <span>Importing...</span>
+                        </div>
+                        <span class="import-active__playlist-name" id="importActivePlaylistName"></span>
+                    </div>
+                    <div class="import-active__progress-wrap">
+                        <div class="import-active__progress-bar">
+                            <div class="import-active__progress-fill" id="importActiveProgressBar" style="width:0%"></div>
+                        </div>
+                        <span class="import-active__pct" id="importActivePct">0%</span>
+                    </div>
+                    <div class="import-active__current-track">
+                        <i class="fas fa-music"></i>
+                        <span id="importActiveCurrentTrack">Fetching playlist from Spotify...</span>
+                    </div>
+                    <div class="import-active__stats">
+                        <div class="import-stat import-stat--success">
+                            <span class="import-stat__value" id="importActiveDownloaded">0</span>
+                            <span class="import-stat__label">Downloaded</span>
+                        </div>
+                        <div class="import-stat import-stat--warning">
+                            <span class="import-stat__value" id="importActiveSkipped">0</span>
+                            <span class="import-stat__label">Skipped</span>
+                        </div>
+                        <div class="import-stat import-stat--danger">
+                            <span class="import-stat__value" id="importActiveFailed">0</span>
+                            <span class="import-stat__label">Failed</span>
+                        </div>
+                    </div>
+                    <div class="import-active__actions">
+                        <button class="btn btn--secondary btn--small" id="importSavePlaylistBtn" onclick="saveActiveJobAsPlaylist()">
+                            <i class="fas fa-list-ul"></i> Save as Playlist
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Import History -->
+                <div class="import-history" id="importHistory">
+                    <h2 class="section-title">
+                        <i class="fas fa-clock-rotate-left"></i> Import History
+                    </h2>
+                    <div class="import-history__list" id="importHistoryList">
+                        <div class="empty-state">
+                            <i class="fab fa-spotify"></i>
+                            <h3>No imports yet</h3>
+                            <p>Paste a Spotify playlist URL above to get started</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Job Detail (Track List) — inserted dynamically -->
+                <div class="import-job-detail hidden" id="importJobDetail">
+                    <div class="import-job-detail__header">
+                        <button class="btn btn--ghost btn--small" onclick="closeJobDetail()">
+                            <i class="fas fa-arrow-left"></i> Back
+                        </button>
+                        <h3 id="importJobDetailTitle">Tracks</h3>
+                    </div>
+                    <div class="import-job-detail__summary" id="importJobDetailSummary"></div>
+                    <div class="import-job-detail__tracks" id="importJobDetailTracks"></div>
+                </div>
+            </div>
             
         </main>
         
@@ -1186,6 +1291,7 @@
     <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
     <script src="{{ url_for('static', filename='js/downloads.js') }}"></script>
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/spotify-import.js') }}"></script>
     <script src="{{ url_for('static', filename='js/playlists.js') }}"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}"></script>
     <script src="{{ url_for('static', filename='js/playback.js') }}"></script>

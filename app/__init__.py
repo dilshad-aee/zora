@@ -41,6 +41,23 @@ def _bootstrap_admin(app):
         print(f"✅ Admin account created for {admin.email}")
 
 
+def _cleanup_stuck_import_jobs(app):
+    """Mark any processing/pending import jobs as failed after server restart."""
+    with app.app_context():
+        from app.models import db
+        from app.models.spotify_import import SpotifyImportJob
+        stuck = SpotifyImportJob.query.filter(
+            SpotifyImportJob.status.in_(['processing', 'pending'])
+        ).all()
+        for job in stuck:
+            job.status = 'failed'
+            job.error_message = 'Server restarted during import'
+            job.current_track = ''
+        if stuck:
+            db.session.commit()
+            print(f"⚠️  Marked {len(stuck)} stuck import job(s) as failed")
+
+
 def create_app(testing=False):
     """Create and configure the Flask application."""
     
@@ -93,6 +110,9 @@ def create_app(testing=False):
     
     # Bootstrap admin on first run
     _bootstrap_admin(app)
+
+    # Clean up stuck import jobs from previous server runs
+    _cleanup_stuck_import_jobs(app)
     
     # Register blueprints
     from app.auth.routes import bp as auth_bp
@@ -108,6 +128,7 @@ def create_app(testing=False):
     from app.routes.preferences import bp as preferences_bp
     from app.routes.categories import bp as categories_bp
     from app.admin.routes import bp as admin_bp
+    from app.routes.spotify_import import bp as spotify_import_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(google_auth_bp)
@@ -122,6 +143,7 @@ def create_app(testing=False):
     app.register_blueprint(preferences_bp, url_prefix='/api')
     app.register_blueprint(categories_bp, url_prefix='/api')
     app.register_blueprint(stream_bp)
+    app.register_blueprint(spotify_import_bp, url_prefix='/api/spotify-import')
     
     # Default-deny: require auth on all routes except explicit allowlist
     PUBLIC_ENDPOINTS = {

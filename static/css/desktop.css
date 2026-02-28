@@ -237,6 +237,12 @@ body.logged-out .player {
         align-items: center;
     }
 
+    /* --- Import View --- */
+    #importView {
+        max-width: 1100px;
+        margin: 0 auto;
+    }
+
     /* --- Profile View --- */
     #profileView {
         max-width: 800px;

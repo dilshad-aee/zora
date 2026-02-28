@@ -425,6 +425,41 @@ const API = {
             if (!response.ok) throw new Error(result.error || 'Failed to delete category');
             return result;
         }
+    },
+
+    // ==================== Spotify Import ====================
+    spotify: {
+        async startImport(playlistUrl) {
+            const response = await API._fetch('/api/spotify-import/start',
+                API._jsonOptions('POST', { playlist_url: playlistUrl })
+            );
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to start import');
+            return data;
+        },
+
+        async getStatus(jobId) {
+            const response = await API._fetch(`/api/spotify-import/status/${jobId}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to get status');
+            return data;
+        },
+
+        async getJobs() {
+            const response = await API._fetch('/api/spotify-import/jobs');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to get jobs');
+            return data;
+        },
+
+        async saveAsPlaylist(jobId, name) {
+            const response = await API._fetch(`/api/spotify-import/save-playlist/${jobId}`,
+                API._jsonOptions('POST', { name })
+            );
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Failed to save playlist');
+            return data;
+        }
     }
 };
 
