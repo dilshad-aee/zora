@@ -160,7 +160,7 @@ const Player = {
 
             // Tab became visible — only resume if it was playing AND user didn't pause
             if (this._wasPlayingBeforeHidden && !this._userPaused) {
-                this.audio.play().catch(() => {});
+                this.audio.play().catch(() => { });
             }
             this._wasPlayingBeforeHidden = false;
         });
@@ -174,7 +174,7 @@ const Player = {
             clearTimeout(this._bgResumeTimer);
             this._bgResumeTimer = setTimeout(() => {
                 if (this.audio && this.audio.paused && !this._userPaused) {
-                    this.audio.play().catch(() => {});
+                    this.audio.play().catch(() => { });
                 }
             }, 800);
         });
@@ -190,7 +190,7 @@ const Player = {
 
         ms.setActionHandler('play', () => {
             this._userPaused = false;
-            this.audio?.play().catch(() => {});
+            this.audio?.play().catch(() => { });
         });
 
         ms.setActionHandler('pause', () => {
@@ -1004,7 +1004,7 @@ const Player = {
         if (this.repeat === 'one') {
             this.audio.currentTime = 0;
             this._userPaused = false;
-            this.audio.play().catch(() => {});
+            this.audio.play().catch(() => { });
             return;
         }
 
@@ -1760,6 +1760,11 @@ const Player = {
      * Close Now Playing panel
      */
     closeNowPlaying() {
+        // Close lyrics panel first if it's open (Bug 5: prevent orphaned overlay)
+        if (typeof Lyrics !== 'undefined' && Lyrics._isOpen) {
+            Lyrics.close();
+        }
+
         const panel = document.getElementById('nowPlayingPanel');
         if (panel) {
             panel.classList.remove('open');

@@ -15,8 +15,8 @@ const Lyrics = {
     _isOpen: false,
     _isSynced: false,
     _currentKey: null,
-    _scrollTimeout: null,
     _userScrolling: false,
+    _previousOverflow: null,
 
     /**
      * Initialize lyrics module — create panel, hook into player
@@ -50,6 +50,13 @@ const Lyrics = {
                 }
             });
         }
+
+        // Close lyrics panel with Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this._isOpen) {
+                this.close();
+            }
+        });
     },
 
     /**
@@ -126,6 +133,9 @@ const Lyrics = {
 
         this._panel.classList.add('open');
         this._isOpen = true;
+
+        // Save current overflow state before overriding (avoids conflict with Now Playing)
+        this._previousOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
 
         // Fetch lyrics if needed
@@ -145,7 +155,11 @@ const Lyrics = {
             this._panel.classList.remove('open');
         }
         this._isOpen = false;
-        document.body.style.overflow = '';
+
+        // Restore previous overflow state instead of blindly clearing it
+        // This preserves Now Playing's overflow:hidden if it was open before lyrics
+        document.body.style.overflow = this._previousOverflow || '';
+        this._previousOverflow = null;
     },
 
     /**
@@ -211,7 +225,9 @@ const Lyrics = {
         const key = `${title}|${artist}`;
         if (this._cache.has(key)) return this._cache.get(key);
 
-        const cleanedTitle = this._cleanTitle(title);
+        let cleanedTitle = this._cleanTitle(title);
+        // Strip "Artist - " prefix common in YouTube titles to avoid redundant search terms
+        cleanedTitle = this._stripArtistPrefix(cleanedTitle, artist);
 
         const params = new URLSearchParams();
         params.set('track_name', cleanedTitle);
@@ -316,6 +332,17 @@ const Lyrics = {
     },
 
     /**
+     * Strip "Artist - " or "Artist – " prefix from title if artist name is known
+     * Many YouTube titles are formatted as "Artist - Song Title"
+     */
+    _stripArtistPrefix(title, artist) {
+        if (!title || !artist) return title;
+        // Match "Artist - Title" or "Artist – Title" (case-insensitive)
+        const prefixRegex = new RegExp('^' + artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[-–—]\\s*', 'i');
+        return title.replace(prefixRegex, '').trim() || title;
+    },
+
+    /**
      * Sync lyrics to current playback time using binary search
      */
     _syncToTime(currentTime) {
@@ -395,8 +422,7 @@ const Lyrics = {
         for (let i = 0; i < this._lines.length; i++) {
             const line = this._lines[i];
             const text = line.text || '♪';
-            const cls = i === 0 ? 'lyrics-line lyrics-line--future' : 'lyrics-line lyrics-line--future';
-            html += `<div class="${cls}" data-index="${i}" data-time="${line.time}">${UI.escapeHtml(text)}</div>`;
+            html += `<div class="lyrics-line lyrics-line--future" data-index="${i}" data-time="${line.time}">${UI.escapeHtml(text)}</div>`;
         }
         html += '</div>';
 
@@ -459,6 +485,13 @@ const Lyrics = {
             </div>
         `;
     },
+
+    /**
+     * Clear the lyrics cache (call if memory is a concern)
+     */
+    clearCache() {
+        this._cache.clear();
+    },
 };
 
 // ─── Inject styles ──────────────────────────────────────────────────────────
@@ -472,16 +505,19 @@ const Lyrics = {
         .lyrics-panel {
             position: fixed;
             inset: 0;
-            z-index: 10000;
+            z-index: 10001;
             display: flex;
             flex-direction: column;
+            background: #000;
             transform: translateY(100%);
             transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
             will-change: transform;
+            visibility: hidden;
         }
 
         .lyrics-panel.open {
             transform: translateY(0);
+            visibility: visible;
         }
 
         .lyrics-panel__backdrop {
