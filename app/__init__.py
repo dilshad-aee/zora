@@ -127,6 +127,7 @@ def create_app(testing=False):
     from app.routes.stream import bp as stream_bp
     from app.routes.preferences import bp as preferences_bp
     from app.routes.categories import bp as categories_bp
+    from app.routes.lyrics import bp as lyrics_bp
     from app.admin.routes import bp as admin_bp
     from app.routes.spotify_import import bp as spotify_import_bp
     
@@ -143,6 +144,7 @@ def create_app(testing=False):
     app.register_blueprint(preferences_bp, url_prefix='/api')
     app.register_blueprint(categories_bp, url_prefix='/api')
     app.register_blueprint(stream_bp)
+    app.register_blueprint(lyrics_bp)
     app.register_blueprint(spotify_import_bp, url_prefix='/api/spotify-import')
     
     # Default-deny: require auth on all routes except explicit allowlist

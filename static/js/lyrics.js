@@ -219,55 +219,96 @@ const Lyrics = {
     },
 
     /**
-     * Fetch lyrics from LRCLIB for a track
+     * Fetch lyrics for a track using cascading fallback:
+     * 1. LRCLIB with title + artist (synced lyrics, best case)
+     * 2. LRCLIB with title only (sometimes works better)
+     * 3. Backend /api/lyrics — Genius fallback (plain lyrics, widest coverage)
      */
     async fetchForTrack(title, artist, duration) {
         const key = `${title}|${artist}`;
         if (this._cache.has(key)) return this._cache.get(key);
 
         let cleanedTitle = this._cleanTitle(title);
-        // Strip "Artist - " prefix common in YouTube titles to avoid redundant search terms
         cleanedTitle = this._stripArtistPrefix(cleanedTitle, artist);
 
+        // ─── Attempt 1: LRCLIB with cleaned title + artist ───
+        let result = await this._tryLRCLIB(cleanedTitle, artist, duration);
+        if (result) {
+            this._cacheSet(key, result);
+            return result;
+        }
+
+        // ─── Attempt 2: LRCLIB with title only (no artist) ───
+        if (artist) {
+            result = await this._tryLRCLIB(cleanedTitle, '', duration);
+            if (result) {
+                this._cacheSet(key, result);
+                return result;
+            }
+        }
+
+        // ─── Attempt 3: Backend fallback (Genius via /api/lyrics) ───
+        result = await this._tryBackend(cleanedTitle, artist);
+        if (result) {
+            this._cacheSet(key, result);
+            return result;
+        }
+
+        // Nothing found from any source
+        this._cacheSet(key, null);
+        return null;
+    },
+
+    /**
+     * Try fetching from LRCLIB API
+     * @private
+     */
+    async _tryLRCLIB(title, artist, duration) {
         const params = new URLSearchParams();
-        params.set('track_name', cleanedTitle);
+        params.set('track_name', title);
         if (artist) params.set('artist_name', artist);
 
         try {
             const resp = await fetch(`https://lrclib.net/api/search?${params.toString()}`);
-            if (!resp.ok) {
-                // Don't cache HTTP errors (e.g. 500, 429) — let user retry later
-                return null;
-            }
+            if (!resp.ok) return null;
 
             const results = await resp.json();
-            if (!results || !results.length) {
-                // Cache "no lyrics found" — this is a legitimate empty result
-                this._cacheSet(key, null);
-                return null;
-            }
+            if (!results || !results.length) return null;
 
-            // Pick best match: prefer synced lyrics, then closest duration
             const best = this._pickBestMatch(results, duration);
-            if (!best) {
-                this._cacheSet(key, null);
-                return null;
-            }
+            if (!best) return null;
 
-            let result;
             if (best.syncedLyrics) {
                 const lines = this._parseLRC(best.syncedLyrics);
-                result = { synced: true, lines, plain: best.plainLyrics || null };
+                return { synced: true, lines, plain: best.plainLyrics || null, source: 'lrclib' };
             } else if (best.plainLyrics) {
-                result = { synced: false, lines: [], plain: best.plainLyrics };
-            } else {
-                result = null;
+                return { synced: false, lines: [], plain: best.plainLyrics, source: 'lrclib' };
             }
-
-            this._cacheSet(key, result);
-            return result;
+            return null;
         } catch {
-            // Don't cache network/CORS errors — let user retry next time
+            return null;
+        }
+    },
+
+    /**
+     * Try fetching from backend /api/lyrics (Genius fallback)
+     * @private
+     */
+    async _tryBackend(title, artist) {
+        try {
+            const params = new URLSearchParams();
+            params.set('title', title);
+            if (artist) params.set('artist', artist);
+
+            const resp = await fetch(`/api/lyrics?${params.toString()}`);
+            if (!resp.ok) return null;
+
+            const data = await resp.json();
+            if (data.plain) {
+                return { synced: false, lines: [], plain: data.plain, source: data.source || 'genius' };
+            }
+            return null;
+        } catch {
             return null;
         }
     },

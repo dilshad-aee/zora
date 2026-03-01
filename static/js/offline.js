@@ -118,8 +118,8 @@ const OfflineManager = {
             return;
         }
 
-        if (!navigator.serviceWorker || !navigator.serviceWorker.controller) {
-            UI.toast('Service worker not ready — try refreshing', 'error');
+        if (!('caches' in window)) {
+            UI.toast('Offline storage not supported in this browser', 'error');
             return;
         }
 
