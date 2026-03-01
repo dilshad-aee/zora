@@ -1176,50 +1176,11 @@ const Player = {
     },
 
     /**
-     * Toggle lyrics
+     * Toggle lyrics panel (delegates to Lyrics module)
      */
     toggleLyrics() {
-        this.lyricsEnabled = !this.lyricsEnabled;
-        this.updateLyricsDisplay();
-        this.showToast(this.lyricsEnabled ? 'Lyrics on' : 'Lyrics off');
-
-        // Show/hide lyrics panel
-        const lyricsPanel = document.getElementById('lyricsPanel');
-        if (lyricsPanel) {
-            lyricsPanel.style.display = this.lyricsEnabled ? 'block' : 'none';
-        }
-    },
-
-    /**
-     * Update lyrics display
-     */
-    updateLyricsDisplay() {
-        const btn = document.getElementById('btnLyrics');
-        if (btn) {
-            btn.classList.toggle('active', this.lyricsEnabled);
-        }
-    },
-
-    /**
-     * Load lyrics for current track
-     */
-    loadLyrics() {
-        if (!this.currentTrack || !this.lyricsEnabled) return;
-
-        // Simple lyrics loading (in production, would use API)
-        const lyricsPanel = document.getElementById('lyricsPanel');
-        if (lyricsPanel) {
-            lyricsPanel.innerHTML = `
-                <div class="lyrics-panel__header">
-                    <h3>${this.currentTrack.title}</h3>
-                    <span class="lyrics-panel__artist">${this.currentTrack.artist}</span>
-                </div>
-                <div class="lyrics-panel__content">
-                    <p class="lyrics-panel__text">
-                        <em>Lyrics loading...</em>
-                    </p>
-                </div>
-            `;
+        if (typeof Lyrics !== 'undefined') {
+            Lyrics.toggle();
         }
     },
 

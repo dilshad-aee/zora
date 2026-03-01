@@ -3,17 +3,19 @@
  * Strategy:
  *   - App shell (HTML, CSS, JS, fonts):  Cache-First with network fallback
  *   - API calls:                         Network-First with cache fallback
- *   - Audio streams (/play/…):           LRU cache (instant replay for recently played tracks)
+ *   - Audio streams (/play/…):           Offline cache (pinned) → LRU cache (instant replay)
  *   - Thumbnails (/api/thumbnails/…):    Stale-While-Revalidate
  */
 
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const SHELL_CACHE = `zora-shell-${CACHE_VERSION}`;
 const THUMB_CACHE = `zora-thumbs-${CACHE_VERSION}`;
 const API_CACHE = `zora-api-${CACHE_VERSION}`;
 // Audio cache is version-independent — survives SW updates, cleared on logout
 const AUDIO_CACHE = 'zora-audio-lru';
 const AUDIO_MAX_ENTRIES = 40;
+// Offline cache — stores tracks explicitly saved for offline listening (never LRU-evicted)
+const OFFLINE_CACHE = 'zora-offline';
 
 // Core app shell assets cached on install
 const SHELL_ASSETS = [
@@ -28,6 +30,8 @@ const SHELL_ASSETS = [
     '/static/js/downloads.js',
     '/static/js/admin.js',
     '/static/js/playback.js',
+    '/static/js/offline.js',
+    '/static/js/lyrics.js',
     '/static/logo.png',
     '/static/images/icons/icon-192x192.png',
     '/static/images/icons/icon-512x512.png',
@@ -49,7 +53,7 @@ self.addEventListener('install', event => {
 // ─── Activate: clean up old caches ──────────────────────────────────────────
 
 self.addEventListener('activate', event => {
-    const CURRENT = new Set([SHELL_CACHE, THUMB_CACHE, API_CACHE, AUDIO_CACHE]);
+    const CURRENT = new Set([SHELL_CACHE, THUMB_CACHE, API_CACHE, AUDIO_CACHE, OFFLINE_CACHE]);
 
     event.waitUntil(
         caches.keys()
@@ -74,9 +78,13 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // 2. Thumbnails — Stale-While-Revalidate
+    // 2. Thumbnails — check offline cache first, then Stale-While-Revalidate
     if (url.pathname.startsWith('/api/thumbnails/')) {
-        event.respondWith(staleWhileRevalidate(request, THUMB_CACHE));
+        event.respondWith(
+            caches.open(OFFLINE_CACHE)
+                .then(c => c.match(new Request(url.pathname)))
+                .then(offlineHit => offlineHit || staleWhileRevalidate(request, THUMB_CACHE))
+        );
         return;
     }
 
@@ -190,6 +198,16 @@ async function handleAudioFetch(request) {
     const cache = await caches.open(AUDIO_CACHE);
     const cacheKey = new Request(new URL(request.url).pathname);
     const rangeHeader = request.headers.get('Range');
+
+    // 0. Offline cache — pinned tracks always served first (never LRU-evicted)
+    const offlineCache = await caches.open(OFFLINE_CACHE);
+    const offlineCached = await offlineCache.match(cacheKey);
+    if (offlineCached) {
+        if (rangeHeader) {
+            try { return await serveRangeFromCache(offlineCached, rangeHeader); } catch { /* fall through */ }
+        }
+        return offlineCached;
+    }
 
     // 1. Try cache — instant replay
     const cached = await cache.match(cacheKey);
@@ -306,8 +324,54 @@ async function trimAudioCache(cache) {
 // ─── Message handler (logout cache clearing) ────────────────────────────────
 
 self.addEventListener('message', event => {
-    if (event.data && event.data.type === 'CLEAR_AUDIO_CACHE') {
+    if (!event.data || !event.data.type) return;
+
+    if (event.data.type === 'CLEAR_AUDIO_CACHE') {
         event.waitUntil(caches.delete(AUDIO_CACHE));
+    }
+
+    // ─── Offline caching messages ────────────────────────────────────────
+    if (event.data.type === 'OFFLINE_CACHE_URL') {
+        // Cache a single URL into the offline cache
+        const { url } = event.data;
+        event.waitUntil(
+            caches.open(OFFLINE_CACHE).then(async (cache) => {
+                const cacheKey = new Request(new URL(url, self.location.origin).pathname);
+                const existing = await cache.match(cacheKey);
+                if (existing) return; // already cached
+                const response = await fetch(url);
+                if (response.ok) await cache.put(cacheKey, response);
+            }).catch(() => {})
+        );
+    }
+
+    if (event.data.type === 'OFFLINE_REMOVE_URLS') {
+        // Remove specific URLs from offline cache
+        const { urls } = event.data;
+        event.waitUntil(
+            caches.open(OFFLINE_CACHE).then(async (cache) => {
+                for (const url of urls) {
+                    const cacheKey = new Request(new URL(url, self.location.origin).pathname);
+                    await cache.delete(cacheKey);
+                }
+            }).catch(() => {})
+        );
+    }
+
+    if (event.data.type === 'OFFLINE_CHECK_URL') {
+        // Check if a URL is in the offline cache and reply
+        const { url, id } = event.data;
+        caches.open(OFFLINE_CACHE).then(async (cache) => {
+            const cacheKey = new Request(new URL(url, self.location.origin).pathname);
+            const cached = !!await cache.match(cacheKey);
+            event.source.postMessage({ type: 'OFFLINE_CHECK_RESULT', id, url, cached });
+        }).catch(() => {
+            event.source.postMessage({ type: 'OFFLINE_CHECK_RESULT', id, url, cached: false });
+        });
+    }
+
+    if (event.data.type === 'CLEAR_OFFLINE_CACHE') {
+        event.waitUntil(caches.delete(OFFLINE_CACHE));
     }
 });
 

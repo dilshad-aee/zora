@@ -1038,6 +1038,11 @@
                 <i class="fas fa-volume-up"></i>
             </div>
             
+            <button type="button" class="now-playing__extra-btn" id="btnLyricsNP">
+                <i class="fas fa-microphone-alt"></i>
+                <span>Lyrics</span>
+            </button>
+            
             <button type="button" class="now-playing__extra-btn" id="btnSleepTimerNP">
                 <i class="fas fa-moon"></i>
                 <span>Sleep Timer</span>
@@ -1255,18 +1260,7 @@
     <!-- Skip Indicator -->
     <div class="skip-indicator" id="skipIndicator"></div>
     
-        <!-- Lyrics Panel -->
-        <div class="lyrics-panel hidden" id="lyricsPanel">
-            <div class="lyrics-panel__content">
-                <button class="lyrics-panel__close" onclick="Player.toggleLyrics()">
-                    <i class="fas fa-times"></i>
-                </button>
-                <div class="lyrics-panel__placeholder">
-                    <i class="fas fa-music"></i>
-                    <p>Lyrics will appear here when playing</p>
-                </div>
-            </div>
-        </div>
+        <!-- Lyrics Panel (dynamically created by lyrics.js) -->
         <!-- Cast Indicator -->
         <div class="cast-indicator hidden" id="castIndicator">
             <i class="fas fa-chromecast"></i>
@@ -1295,6 +1289,8 @@
     <script src="{{ url_for('static', filename='js/playlists.js') }}"></script>
     <script src="{{ url_for('static', filename='js/library.js') }}"></script>
     <script src="{{ url_for('static', filename='js/playback.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/offline.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/lyrics.js') }}"></script>
     <!-- Initialize Player -->
     <script>
         window.addEventListener('load', () => {

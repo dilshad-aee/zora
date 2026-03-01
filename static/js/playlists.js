@@ -186,11 +186,16 @@ function renderPlaylistCard(pl, options = {}) {
     const liked = pl.liked ? 'liked' : '';
     const likeIcon = pl.liked ? 'fas' : 'far';
 
+    const offlineBadge = (typeof OfflineManager !== 'undefined' && OfflineManager.isPlaylistOffline(pl.id))
+        ? '<span class="playlist-card__offline" title="Available offline"><i class="fas fa-cloud-arrow-down"></i></span>'
+        : '';
+
     return `
     <div class="playlist-card" onclick="openPlaylistDetail(${pl.id})">
         <div class="playlist-card__cover">
             <i class="fas fa-compact-disc playlist-card__cover-icon"></i>
             <span class="playlist-card__count">${pl.song_count} <i class="fas fa-music"></i></span>
+            ${offlineBadge}
         </div>
         <div class="playlist-card__body">
             <h3 class="playlist-card__name">${UI.escapeHtml(pl.name)} ${visibilityIcon}</h3>
@@ -270,6 +275,19 @@ function renderPlaylistDetailHeader(pl, isOwner) {
             <i class="fas fa-trash"></i> <span class="btn-text">Delete</span>
         </button>` : '';
 
+    // Offline download button (available for any playlist with songs)
+    const isOffline = typeof OfflineManager !== 'undefined' && OfflineManager.isPlaylistOffline(pl.id);
+    const offlineBtn = songs.length ? `<span id="offlineBtnContainer">
+        ${isOffline
+            ? `<button class="btn btn--small offline-btn offline-btn--saved" onclick="removePlaylistOffline()">
+                   <i class="fas fa-check-circle"></i> <span class="btn-text">Saved Offline</span>
+               </button>`
+            : `<button class="btn btn--small offline-btn" onclick="savePlaylistOffline()">
+                   <i class="fas fa-cloud-arrow-down"></i> <span class="btn-text">Save Offline</span>
+               </button>`
+        }
+    </span>` : '';
+
     header.innerHTML = `
         <div class="playlist-detail__info">
             <div class="playlist-detail__icon">
@@ -297,7 +315,7 @@ function renderPlaylistDetailHeader(pl, isOwner) {
                 </div>
             </div>
         </div>
-        <div class="playlist-detail__actions">${ownerActions}</div>
+        <div class="playlist-detail__actions">${ownerActions}${offlineBtn}</div>
     `;
 }
 
