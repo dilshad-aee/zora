@@ -13,9 +13,9 @@
     --bg-card: #181818;
     --bg-hover: #282828;
     --bg-elevated: #242424;
-    --accent: #1DB954;
-    --accent-hover: #1ed760;
-    --accent-dim: rgba(29, 185, 84, 0.1);
+    --accent: #7C6CFF;
+    --accent-hover: #9589FF;
+    --accent-dim: rgba(124, 108, 255, 0.1);
     --text: #ffffff;
     --text-secondary: #b3b3b3;
     --text-muted: #535353;
@@ -882,8 +882,8 @@ body.sidebar-open {
 }
 
 #libraryView .library-search__input-wrapper:focus-within {
-    border-color: rgba(29, 185, 84, 0.45);
-    background: linear-gradient(180deg, rgba(29, 185, 84, 0.09), rgba(29, 185, 84, 0.02));
+    border-color: rgba(124, 108, 255, 0.45);
+    background: linear-gradient(180deg, rgba(124, 108, 255, 0.09), rgba(124, 108, 255, 0.02));
 }
 
 #libraryView .library-search__input-wrapper i {
@@ -955,9 +955,9 @@ body.sidebar-open {
 
 #libraryView .library-card:hover,
 #libraryView .library-item:hover {
-    border-color: rgba(29, 185, 84, 0.45);
+    border-color: rgba(124, 108, 255, 0.45);
     transform: translateY(-1px);
-    background: linear-gradient(180deg, rgba(29, 185, 84, 0.08), rgba(29, 185, 84, 0.02));
+    background: linear-gradient(180deg, rgba(124, 108, 255, 0.08), rgba(124, 108, 255, 0.02));
 }
 
 #libraryView .library-card:active,
@@ -1043,7 +1043,7 @@ body.sidebar-open {
 }
 
 #libraryView .library-card__menu-toggle:hover {
-    background: rgba(29, 185, 84, 0.9);
+    background: rgba(124, 108, 255, 0.9);
     color: #000;
 }
 
@@ -1179,9 +1179,9 @@ body.sidebar-open {
 }
 
 .playlist-workspace-switch__btn.active {
-    border-color: rgba(29, 185, 84, 0.5);
+    border-color: rgba(124, 108, 255, 0.5);
     color: var(--accent);
-    background: rgba(29, 185, 84, 0.14);
+    background: rgba(124, 108, 255, 0.14);
 }
 
 .playlists-panel {
@@ -1559,8 +1559,8 @@ body.sidebar-open {
 }
 
 .playlist-add-row--added {
-    border-color: rgba(29, 185, 84, 0.35);
-    background: rgba(29, 185, 84, 0.08);
+    border-color: rgba(124, 108, 255, 0.35);
+    background: rgba(124, 108, 255, 0.08);
 }
 
 .playlist-add-row__thumb {
@@ -1599,8 +1599,8 @@ body.sidebar-open {
 
 .playlist-add-row__btn--added {
     color: var(--accent);
-    border-color: rgba(29, 185, 84, 0.4);
-    background: rgba(29, 185, 84, 0.1);
+    border-color: rgba(124, 108, 255, 0.4);
+    background: rgba(124, 108, 255, 0.1);
 }
 
 @media (max-width: 900px) {
@@ -1862,11 +1862,11 @@ body.sidebar-open {
 
     0%,
     100% {
-        box-shadow: 0 0 0 0 rgba(29, 185, 84, 0.4);
+        box-shadow: 0 0 0 0 rgba(124, 108, 255, 0.4);
     }
 
     50% {
-        box-shadow: 0 0 0 10px rgba(29, 185, 84, 0);
+        box-shadow: 0 0 0 10px rgba(124, 108, 255, 0);
     }
 }
 
@@ -2381,7 +2381,7 @@ audio {
     height: 5px;
     -webkit-appearance: none;
     appearance: none;
-    background: linear-gradient(to right, #1db954 0%, #1db954 var(--slider-percent, 100%), rgba(255, 255, 255, 0.2) var(--slider-percent, 100%), rgba(255, 255, 255, 0.2) 100%);
+    background: linear-gradient(to right, #7C6CFF 0%, #7C6CFF var(--slider-percent, 100%), rgba(255, 255, 255, 0.2) var(--slider-percent, 100%), rgba(255, 255, 255, 0.2) 100%);
     border-radius: 3px;
     cursor: pointer;
     outline: none;
@@ -2541,7 +2541,7 @@ audio {
 .sleep-timer-menu__status {
     margin-top: 12px;
     padding: 10px;
-    background: rgba(29, 185, 84, 0.1);
+    background: rgba(124, 108, 255, 0.1);
     border-radius: var(--radius);
     color: var(--accent);
     font-size: 0.85rem;
@@ -2764,7 +2764,7 @@ audio {
     align-items: center;
     gap: 6px;
     z-index: 9998;
-    box-shadow: 0 2px 12px rgba(29, 185, 84, 0.4);
+    box-shadow: 0 2px 12px rgba(124, 108, 255, 0.4);
     cursor: pointer;
     transition: transform 0.2s, opacity 0.2s;
 }
@@ -2969,7 +2969,7 @@ audio {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%) scale(0);
-    background: rgba(29, 185, 84, 0.9);
+    background: rgba(124, 108, 255, 0.9);
     color: #000;
     padding: 12px 24px;
     border-radius: 50px;
@@ -3065,9 +3065,9 @@ audio {
     gap: 12px;
     width: 100%;
     padding: 12px 14px;
-    border: 1px solid rgba(29, 185, 84, 0.45);
+    border: 1px solid rgba(124, 108, 255, 0.45);
     border-radius: 12px;
-    background: rgba(29, 185, 84, 0.1);
+    background: rgba(124, 108, 255, 0.1);
     color: var(--text);
     cursor: pointer;
     user-select: none;
@@ -4006,9 +4006,9 @@ audio {
 }
 
 #downloadView .tab.active {
-    background: rgba(29, 185, 84, 0.12);
+    background: rgba(124, 108, 255, 0.12);
     color: var(--accent);
-    border-color: rgba(29, 185, 84, 0.45);
+    border-color: rgba(124, 108, 255, 0.45);
 }
 
 #downloadView .search-box__input-wrapper {
@@ -4040,7 +4040,7 @@ audio {
     border-radius: 10px;
     font-size: 0.95rem;
     font-weight: 700;
-    box-shadow: 0 10px 24px rgba(29, 185, 84, 0.25);
+    box-shadow: 0 10px 24px rgba(124, 108, 255, 0.25);
 }
 
 #downloadView .search-btn i {
@@ -4103,8 +4103,8 @@ audio {
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--accent);
-    background: rgba(29, 185, 84, 0.14);
-    border: 1px solid rgba(29, 185, 84, 0.35);
+    background: rgba(124, 108, 255, 0.14);
+    border: 1px solid rgba(124, 108, 255, 0.35);
 }
 
 #downloadView .download-card__artist {
@@ -4422,7 +4422,7 @@ audio {
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 16px;
     background:
-        radial-gradient(120% 80% at 0% 0%, rgba(29, 185, 84, 0.08), rgba(29, 185, 84, 0) 45%),
+        radial-gradient(120% 80% at 0% 0%, rgba(124, 108, 255, 0.08), rgba(124, 108, 255, 0) 45%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.015) 100%);
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
 }
@@ -4499,8 +4499,8 @@ audio {
     font-size: 0.92rem;
     font-weight: 700;
     letter-spacing: 0.01em;
-    background: linear-gradient(135deg, #1db954 0%, #19a34c 100%);
-    box-shadow: 0 8px 16px rgba(29, 185, 84, 0.22);
+    background: linear-gradient(135deg, #7C6CFF 0%, #6B5CE0 100%);
+    box-shadow: 0 8px 16px rgba(124, 108, 255, 0.22);
 }
 
 #downloadView .warning-banner {
@@ -4519,7 +4519,7 @@ audio {
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     background:
-        radial-gradient(120% 90% at 0% 0%, rgba(29, 185, 84, 0.07), rgba(29, 185, 84, 0) 45%),
+        radial-gradient(120% 90% at 0% 0%, rgba(124, 108, 255, 0.07), rgba(124, 108, 255, 0) 45%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
 }
 
@@ -4542,8 +4542,8 @@ audio {
     align-items: center;
     padding: 4px 10px;
     border-radius: 999px;
-    background: rgba(29, 185, 84, 0.12);
-    border: 1px solid rgba(29, 185, 84, 0.36);
+    background: rgba(124, 108, 255, 0.12);
+    border: 1px solid rgba(124, 108, 255, 0.36);
     color: var(--accent);
     font-size: 0.68rem;
     font-weight: 700;
@@ -4743,9 +4743,9 @@ audio {
 
 #playlistDownloadsView .overall-progress {
     border-width: 1px;
-    border-color: rgba(29, 185, 84, 0.35);
+    border-color: rgba(124, 108, 255, 0.35);
     border-radius: 14px;
-    background: linear-gradient(180deg, rgba(29, 185, 84, 0.08), rgba(29, 185, 84, 0.02));
+    background: linear-gradient(180deg, rgba(124, 108, 255, 0.08), rgba(124, 108, 255, 0.02));
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 
@@ -5076,7 +5076,7 @@ audio {
 }
 
 .profile-badge--admin {
-    background: rgba(29, 185, 84, 0.2);
+    background: rgba(124, 108, 255, 0.2);
     color: var(--accent);
 }
 
@@ -5439,7 +5439,7 @@ audio {
     padding: 8px 18px;
     border: none;
     border-radius: var(--radius-md, 8px);
-    background: var(--accent, #1db954);
+    background: var(--accent, #7C6CFF);
     color: #fff;
     font-size: 0.8125rem;
     font-weight: 600;
@@ -6146,8 +6146,8 @@ audio {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    background: rgba(29, 185, 84, 0.12);
-    color: #1DB954;
+    background: rgba(124, 108, 255, 0.12);
+    color: #7C6CFF;
     font-size: 1.4rem;
     flex-shrink: 0;
 }
@@ -6227,7 +6227,7 @@ audio {
 
 .import-active__progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #1DB954, #1ed760);
+    background: linear-gradient(90deg, #7C6CFF, #9589FF);
     border-radius: 8px;
     transition: width 0.5s ease;
 }
@@ -6323,7 +6323,7 @@ audio {
 }
 
 .import-history-card:hover {
-    border-color: rgba(29, 185, 84, 0.3);
+    border-color: rgba(124, 108, 255, 0.3);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
@@ -6386,7 +6386,7 @@ audio {
 }
 
 .import-status-badge--active {
-    background: rgba(29, 185, 84, 0.12);
+    background: rgba(124, 108, 255, 0.12);
     color: var(--accent);
 }
 
@@ -6480,7 +6480,7 @@ audio {
 
 .import-track-row__score {
     padding: 2px 8px;
-    background: rgba(29, 185, 84, 0.1);
+    background: rgba(124, 108, 255, 0.1);
     color: var(--accent);
     border-radius: 12px;
     font-size: 0.72rem;
@@ -7014,9 +7014,9 @@ audio {
 }
 
 .offline-btn--saved {
-    background: rgba(29, 185, 84, 0.12);
+    background: rgba(124, 108, 255, 0.12);
     color: var(--accent);
-    border-color: rgba(29, 185, 84, 0.25);
+    border-color: rgba(124, 108, 255, 0.25);
 }
 
 .offline-btn--saved:hover {
@@ -7030,7 +7030,7 @@ audio {
     position: absolute;
     top: 8px;
     left: 8px;
-    background: rgba(29, 185, 84, 0.85);
+    background: rgba(124, 108, 255, 0.85);
     color: #fff;
     width: 26px;
     height: 26px;

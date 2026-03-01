@@ -78,7 +78,7 @@ body.logged-out .player {
     }
 
     .btn:focus-visible {
-        box-shadow: 0 0 0 4px rgba(29, 185, 84, 0.2);
+        box-shadow: 0 0 0 4px rgba(124, 108, 255, 0.2);
     }
 
     .player__btn:focus-visible {
@@ -1066,7 +1066,7 @@ body.logged-out .player {
 
     /* --- Admin table row hover tint --- */
     .admin-table tr:hover td {
-        background: rgba(29, 185, 84, 0.03);
+        background: rgba(124, 108, 255, 0.03);
     }
 
     /* --- Sleep timer button lift --- */
@@ -1085,7 +1085,7 @@ body.logged-out .player {
     }
 
     #downloadView .download-card:hover {
-        box-shadow: 0 14px 40px rgba(29, 185, 84, 0.12);
+        box-shadow: 0 14px 40px rgba(124, 108, 255, 0.12);
     }
 
     /* --- Subtle button scale on hover --- */
@@ -1112,7 +1112,7 @@ body.logged-out .player {
     }
 
     .profile-card:hover {
-        border-color: rgba(29, 185, 84, 0.3);
+        border-color: rgba(124, 108, 255, 0.3);
     }
 
     /* --- Admin category item hover --- */
