@@ -236,20 +236,21 @@ const Lyrics = {
         try {
             const resp = await fetch(`https://lrclib.net/api/search?${params.toString()}`);
             if (!resp.ok) {
-                this._cache.set(key, null);
+                // Don't cache HTTP errors (e.g. 500, 429) — let user retry later
                 return null;
             }
 
             const results = await resp.json();
             if (!results || !results.length) {
-                this._cache.set(key, null);
+                // Cache "no lyrics found" — this is a legitimate empty result
+                this._cacheSet(key, null);
                 return null;
             }
 
             // Pick best match: prefer synced lyrics, then closest duration
             const best = this._pickBestMatch(results, duration);
             if (!best) {
-                this._cache.set(key, null);
+                this._cacheSet(key, null);
                 return null;
             }
 
@@ -263,10 +264,10 @@ const Lyrics = {
                 result = null;
             }
 
-            this._cache.set(key, result);
+            this._cacheSet(key, result);
             return result;
         } catch {
-            this._cache.set(key, null);
+            // Don't cache network/CORS errors — let user retry next time
             return null;
         }
     },
@@ -487,7 +488,20 @@ const Lyrics = {
     },
 
     /**
-     * Clear the lyrics cache (call if memory is a concern)
+     * Write to cache with size cap to prevent unbounded memory growth
+     * @private
+     */
+    _cacheSet(key, value) {
+        // Evict oldest entries if cache exceeds 100 tracks
+        if (this._cache.size >= 100) {
+            const firstKey = this._cache.keys().next().value;
+            this._cache.delete(firstKey);
+        }
+        this._cache.set(key, value);
+    },
+
+    /**
+     * Clear the lyrics cache
      */
     clearCache() {
         this._cache.clear();
