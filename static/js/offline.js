@@ -176,7 +176,7 @@ const OfflineManager = {
                 this._activeDownload.failed++;
             }
 
-            this._updateProgressUI(this._activeDownload.completed + this._activeDownload.failed, songs.length);
+            this._updateProgressUI(this._activeDownload.completed + this._activeDownload.failed, songs.length, song.title || song.filename);
         }
 
         if (this._activeDownload.cancelled) {
@@ -269,31 +269,41 @@ const OfflineManager = {
         bar.className = 'offline-progress';
         bar.innerHTML = `
             <div class="offline-progress__inner">
-                <div class="offline-progress__info">
-                    <i class="fas fa-download"></i>
-                    <span class="offline-progress__text">Saving "${UI.escapeHtml(name)}" for offline…</span>
-                    <span class="offline-progress__count">0 / ${total}</span>
+                <div class="offline-progress__header">
+                    <div class="offline-progress__title">
+                        <i class="fas fa-download"></i>
+                        <span>Saving "${UI.escapeHtml(name)}" for offline</span>
+                    </div>
+                    <button class="offline-progress__cancel" onclick="OfflineManager.cancelDownload()">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
+                <div class="offline-progress__song">Preparing…</div>
                 <div class="offline-progress__bar">
                     <div class="offline-progress__fill" style="width: 0%"></div>
                 </div>
-                <button class="offline-progress__cancel" onclick="OfflineManager.cancelDownload()">
-                    <i class="fas fa-times"></i>
-                </button>
+                <div class="offline-progress__footer">
+                    <span class="offline-progress__count">0 / ${total}</span>
+                    <span class="offline-progress__percent">0%</span>
+                </div>
             </div>
         `;
         document.body.appendChild(bar);
         requestAnimationFrame(() => bar.classList.add('offline-progress--visible'));
     },
 
-    _updateProgressUI(done, total) {
+    _updateProgressUI(done, total, songTitle) {
         const bar = document.getElementById('offlineProgressBar');
         if (!bar) return;
         const pct = Math.round((done / total) * 100);
         const fill = bar.querySelector('.offline-progress__fill');
         const count = bar.querySelector('.offline-progress__count');
+        const percent = bar.querySelector('.offline-progress__percent');
+        const songEl = bar.querySelector('.offline-progress__song');
         if (fill) fill.style.width = `${pct}%`;
         if (count) count.textContent = `${done} / ${total}`;
+        if (percent) percent.textContent = `${pct}%`;
+        if (songEl && songTitle) songEl.textContent = songTitle;
     },
 
     _removeProgressUI() {

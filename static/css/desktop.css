@@ -45,11 +45,11 @@ body.logged-out .player {
 }
 
 /* Fallback: sibling selector in case body class isn't set yet */
-.sidebar.hidden ~ .main {
+.sidebar.hidden~.main {
     margin-left: 0;
 }
 
-.sidebar.hidden ~ .player {
+.sidebar.hidden~.player {
     left: 0;
 }
 
@@ -78,7 +78,7 @@ body.logged-out .player {
     }
 
     .btn:focus-visible {
-        box-shadow: 0 0 0 4px rgba(124, 108, 255, 0.2);
+        box-shadow: 0 0 0 4px rgba(250, 45, 72, 0.2);
     }
 
     .player__btn:focus-visible {
@@ -111,14 +111,14 @@ body.logged-out .player {
     /* --- Smoother card transitions --- */
     .result-card {
         transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                    border-color 0.25s ease,
-                    box-shadow 0.25s ease;
+            border-color 0.25s ease,
+            box-shadow 0.25s ease;
     }
 
     .playlist-card {
         transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                    border-color 0.25s ease,
-                    box-shadow 0.25s ease;
+            border-color 0.25s ease,
+            box-shadow 0.25s ease;
     }
 
     /* ========= PER-VIEW DESKTOP POLISH ========= */
@@ -1066,7 +1066,7 @@ body.logged-out .player {
 
     /* --- Admin table row hover tint --- */
     .admin-table tr:hover td {
-        background: rgba(124, 108, 255, 0.03);
+        background: rgba(250, 45, 72, 0.03);
     }
 
     /* --- Sleep timer button lift --- */
@@ -1085,7 +1085,7 @@ body.logged-out .player {
     }
 
     #downloadView .download-card:hover {
-        box-shadow: 0 14px 40px rgba(124, 108, 255, 0.12);
+        box-shadow: 0 14px 40px rgba(250, 45, 72, 0.12);
     }
 
     /* --- Subtle button scale on hover --- */
@@ -1112,7 +1112,7 @@ body.logged-out .player {
     }
 
     .profile-card:hover {
-        border-color: rgba(124, 108, 255, 0.3);
+        border-color: rgba(250, 45, 72, 0.3);
     }
 
     /* --- Admin category item hover --- */

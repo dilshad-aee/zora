@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Zora - YouTube Music Downloader
+Zora Music
 
 Single entry point for the application.
 Run with: python run.py

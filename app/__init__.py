@@ -1,5 +1,5 @@
 """
-Zora - YouTube Music Downloader
+Zora Music
 
 Flask application factory and initialization.
 """

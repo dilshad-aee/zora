@@ -298,9 +298,9 @@ async function loadServerStatus() {
 }
 
 function _statusColor(percent) {
-    if (percent >= 90) return '#e74c3c';
-    if (percent >= 70) return '#f39c12';
-    return '#2ecc71';
+    if (percent >= 90) return '#FF3B30';
+    if (percent >= 70) return '#FF9F0A';
+    return '#30D158';
 }
 
 function _formatBytes(mb) {

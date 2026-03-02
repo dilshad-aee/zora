@@ -345,7 +345,7 @@ function renderPlaylistDetailSongs(songs, isOwner) {
             </div>
             ${duration ? `<span class="playlist-song-row__duration">${duration}</span>` : ''}
             <div class="playlist-song-row__actions">
-                <button class="btn btn--icon btn--small song-menu-trigger" 
+                <button class="btn btn--icon song-menu-trigger" 
                         onclick="event.stopPropagation(); toggleSongMenu(${song.id}, ${isOwner}, this)"
                         title="More options">
                     <i class="fas fa-ellipsis-v"></i>
