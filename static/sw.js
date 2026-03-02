@@ -7,7 +7,7 @@
  *   - Thumbnails (/api/thumbnails/…):    Stale-While-Revalidate
  */
 
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 const SHELL_CACHE = `zora-shell-${CACHE_VERSION}`;
 const THUMB_CACHE = `zora-thumbs-${CACHE_VERSION}`;
 const API_CACHE = `zora-api-${CACHE_VERSION}`;
