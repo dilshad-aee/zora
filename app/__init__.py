@@ -72,6 +72,9 @@ def create_app(testing=False):
     app.config['SQLALCHEMY_DATABASE_URI'] = config.SQLALCHEMY_DATABASE_URI
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
+    # Cache static assets (CSS/JS/images) for 1 week; PWA service worker handles updates
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 604800  # 7 days in seconds
+    
     # Session cookie security
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'

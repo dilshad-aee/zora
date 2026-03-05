@@ -48,6 +48,10 @@ async function loadExplorePlaylists(page = 1) {
     const sortEl = document.getElementById('exploreSortSelect');
     const sort = sortEl ? sortEl.value : 'recent';
 
+    // Show skeleton placeholders while loading
+    const grid = document.getElementById('exploreGrid');
+    if (grid) grid.innerHTML = _playlistSkeletonHTML(6);
+
     try {
         const data = await API.explorePlaylists({
             category: _selectedCategoryId || undefined,
@@ -129,6 +133,10 @@ function renderCategoryFilterBar(categories) {
 // ==================== My Playlists ====================
 
 async function loadMyPlaylists() {
+    // Show skeleton placeholders while loading
+    const grid = document.getElementById('myPlaylistsGrid');
+    if (grid) grid.innerHTML = _playlistSkeletonHTML(4);
+
     try {
         const playlists = await API.getPlaylists();
         State.playlists.list = playlists;
@@ -224,6 +232,12 @@ async function openPlaylistDetail(playlistId) {
     document.getElementById('playlistTabExplore')?.classList.add('hidden');
     document.getElementById('playlistTabMine')?.classList.add('hidden');
     document.getElementById('playlistTabDetail')?.classList.remove('hidden');
+
+    // Show skeleton placeholders while loading
+    const header = document.getElementById('playlistDetailHeader');
+    const songsList = document.getElementById('playlistSongsList');
+    if (header) header.innerHTML = '<div class="skeleton-line skeleton-line--title" style="width:40%;height:20px;margin-bottom:12px"></div><div class="skeleton-line skeleton-line--subtitle" style="width:60%"></div>';
+    if (songsList) songsList.innerHTML = _songSkeletonHTML(5);
 
     try {
         const data = await API.getPlaylistSongs(playlistId);
@@ -338,7 +352,7 @@ function renderPlaylistDetailSongs(songs, isOwner) {
              onclick="playPlaylistSong(${song.id})">
             <div class="playlist-song-row__num">${isPlaying ? '<i class="fas fa-volume-up"></i>' : i + 1}</div>
             <img src="${song.thumbnail || '/static/images/default-album.png'}" 
-                 alt="" class="playlist-song-row__thumb" onerror="this.src='/static/images/default-album.png'">
+                 alt="" class="playlist-song-row__thumb" loading="lazy" onerror="this.src='/static/images/default-album.png'">
             <div class="playlist-song-row__info">
                 <span class="playlist-song-row__title">${UI.escapeHtml(song.title || 'Unknown')}</span>
                 <span class="playlist-song-row__artist">${UI.escapeHtml(song.artist || song.uploader || 'Unknown')}</span>
@@ -447,6 +461,9 @@ function closeAddToOtherPlaylistModal() {
 }
 
 async function addSongToOtherPlaylist(playlistId, downloadId) {
+    // Disable all options to prevent double-clicks
+    document.querySelectorAll('#addToOtherPlaylistModal .add-to-playlist-option').forEach(b => b.disabled = true);
+
     try {
         await API.addSongToPlaylist(playlistId, downloadId);
         UI.toast('Added to playlist!', 'success');
@@ -569,6 +586,9 @@ async function submitCreatePlaylist() {
         return;
     }
 
+    const btn = document.querySelector('#createPlaylistModal .btn--primary');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...'; }
+
     try {
         const pl = await API.createPlaylist({ name, description, visibility, category_id: category_id || undefined });
         // Push directly into local state so it shows immediately
@@ -581,6 +601,8 @@ async function submitCreatePlaylist() {
         if (visibility === 'public') loadExplorePlaylists();
     } catch (err) {
         UI.toast(err.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Create Playlist'; }
     }
 }
 
@@ -655,6 +677,9 @@ async function submitEditPlaylist(playlistId) {
         return;
     }
 
+    const btn = document.querySelector('#editPlaylistModal .btn--primary');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'; }
+
     try {
         await API.updatePlaylist(playlistId, { name, description, visibility, category_id });
         UI.toast('Playlist updated!', 'success');
@@ -663,6 +688,8 @@ async function submitEditPlaylist(playlistId) {
         openPlaylistDetail(playlistId);
     } catch (err) {
         UI.toast(err.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Changes'; }
     }
 }
 
@@ -680,6 +707,7 @@ async function deleteSelectedPlaylist() {
     });
     if (!confirmed) return;
 
+    UI.showLoader('Deleting playlist...');
     try {
         await API.deletePlaylist(playlistId);
         UI.toast('Playlist deleted', 'success');
@@ -689,6 +717,8 @@ async function deleteSelectedPlaylist() {
         loadMyPlaylists();
     } catch (err) {
         UI.toast(err.message, 'error');
+    } finally {
+        UI.hideLoader();
     }
 }
 
@@ -698,6 +728,7 @@ async function removeSongFromSelectedPlaylist(downloadId) {
     const playlistId = State.playlists.selectedId;
     if (!playlistId || !downloadId) return;
 
+    UI.showLoader('Removing song...');
     try {
         await API.removeSongFromPlaylist(playlistId, downloadId);
         State.playlists.songs = State.playlists.songs.filter(s => s.id !== downloadId);
@@ -708,6 +739,8 @@ async function removeSongFromSelectedPlaylist(downloadId) {
         UI.toast('Song removed', 'success');
     } catch (err) {
         UI.toast(err.message, 'error');
+    } finally {
+        UI.hideLoader();
     }
 }
 
@@ -753,6 +786,9 @@ function renderAddToPlaylistOptions() {
 async function addCurrentSongToPlaylist(playlistId) {
     const downloadId = State.playlists.pendingDownloadId;
     if (!downloadId) return;
+
+    // Disable all playlist options to prevent double-clicks
+    document.querySelectorAll('#addToPlaylistOptions .add-to-playlist-option').forEach(b => b.disabled = true);
 
     try {
         await API.addSongToPlaylist(playlistId, downloadId);
@@ -841,7 +877,7 @@ function renderAddSongsToPlaylistList() {
         return `
         <div class="add-songs-item ${inPlaylist ? 'in-playlist' : ''}">
             <img src="${song.thumbnail || '/static/images/default-album.png'}" 
-                 alt="" class="add-songs-item__thumb" onerror="this.src='/static/images/default-album.png'">
+                 alt="" class="add-songs-item__thumb" loading="lazy" onerror="this.src='/static/images/default-album.png'">
             <div class="add-songs-item__info">
                 <span class="add-songs-item__title">${UI.escapeHtml(song.title || 'Unknown')}</span>
                 <span class="add-songs-item__artist">${UI.escapeHtml(song.artist || song.uploader || 'Unknown')}</span>
@@ -1025,4 +1061,16 @@ function togglePlaylistLoop() {
 function closeAddSongsToSelectedPlaylistModal() { closeAddSongsModal(); }
 function closeAddSongsToPlaylistModalOnOverlay(event) {
     if (event.target === event.currentTarget) closeAddSongsModal();
+}
+
+// ==================== Skeleton Helpers ====================
+
+function _playlistSkeletonHTML(count = 4) {
+    const card = `<div class="skeleton-card"><div class="skeleton-card__cover"></div><div class="skeleton-card__body"><div class="skeleton-line skeleton-line--title"></div><div class="skeleton-line skeleton-line--subtitle"></div></div></div>`;
+    return `<div class="skeleton-grid">${card.repeat(count)}</div>`;
+}
+
+function _songSkeletonHTML(count = 5) {
+    const row = `<div class="skeleton-song-row"><div class="skeleton-song-row__thumb"></div><div class="skeleton-song-row__info"><div class="skeleton-line skeleton-line--title"></div><div class="skeleton-line skeleton-line--subtitle"></div></div></div>`;
+    return row.repeat(count);
 }

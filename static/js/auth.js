@@ -63,6 +63,8 @@ async function handleLogin(e) {
     try {
         const user = await API.auth.login(email, password);
         State.user = user;
+        // Show welcome loader immediately
+        showWelcomeLoader(`Welcome back, ${user.name}!`, 'Loading your music library');
         // Re-init the full app
         applyRoleUI();
         Player.init();
@@ -70,11 +72,12 @@ async function handleLogin(e) {
         setupLibraryLazyLoading();
         adjustMainPadding();
         window.addEventListener('resize', adjustMainPadding);
-        if (State.user.role === 'admin') await loadSettings();
-        await loadHistory();
-        await loadPlaylists();
+        // Load data in parallel
+        const loads = [loadHistory(), loadPlaylists()];
+        if (State.user.role === 'admin') loads.push(loadSettings());
+        await Promise.all(loads);
         showView('library');
-        UI.toast(`Welcome back, ${user.name}!`, 'success');
+        hideWelcomeLoader();
     } catch (error) {
         UI.toast(error.message, 'error');
     } finally {
@@ -100,16 +103,18 @@ async function handleSignup(e) {
     try {
         const user = await API.auth.signup(name, email, password, confirm);
         State.user = user;
+        // Show welcome loader immediately
+        showWelcomeLoader(`Welcome to Zora, ${user.name}!`, 'Getting everything ready for you');
         applyRoleUI();
         Player.init();
         setupEventListeners();
         setupLibraryLazyLoading();
         adjustMainPadding();
         window.addEventListener('resize', adjustMainPadding);
-        await loadHistory();
-        await loadPlaylists();
+        // Load data in parallel
+        await Promise.all([loadHistory(), loadPlaylists()]);
         showView('library');
-        UI.toast(`Welcome to Zora, ${user.name}!`, 'success');
+        hideWelcomeLoader();
     } catch (error) {
         UI.toast(error.message, 'error');
     } finally {

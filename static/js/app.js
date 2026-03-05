@@ -189,6 +189,24 @@ function resumeLastPlayback() {
     delete State._pendingResume;
 }
 
+// ==================== Welcome Loader ====================
+function showWelcomeLoader(title, hint) {
+    const el = document.getElementById('welcomeLoader');
+    if (!el) return;
+    const titleEl = document.getElementById('welcomeLoaderTitle');
+    const hintEl = document.getElementById('welcomeLoaderHint');
+    if (titleEl) titleEl.textContent = title || 'Setting up your music...';
+    if (hintEl) hintEl.textContent = hint || 'Hang tight, this won\'t take long';
+    el.classList.remove('hidden', 'fade-out');
+}
+
+function hideWelcomeLoader() {
+    const el = document.getElementById('welcomeLoader');
+    if (!el || el.classList.contains('hidden')) return;
+    el.classList.add('fade-out');
+    el.addEventListener('animationend', () => el.classList.add('hidden'), { once: true });
+}
+
 // ==================== Initialize ====================
 document.addEventListener('DOMContentLoaded', () => {
     init();
@@ -258,21 +276,20 @@ async function init() {
         State.library.viewMode = savedLibraryViewMode;
     }
 
-    // Load server-synced preferences (override localStorage defaults)
-    await loadServerPreferences();
+    // Show welcome loader while data loads
+    showWelcomeLoader('Setting up your music...', 'Loading your library & playlists');
 
-    // Load data based on role
-    if (State.user.role === 'admin') {
-        await loadSettings();
-    }
-    await loadHistory();
-    await loadPlaylists();
+    // Load data in parallel
+    const dataLoads = [loadServerPreferences(), loadHistory(), loadPlaylists()];
+    if (State.user.role === 'admin') dataLoads.push(loadSettings());
+    await Promise.all(dataLoads);
 
     // Resume last track (after history is loaded so queue can be built)
     resumeLastPlayback();
 
-    // Show default view
+    // Show the library view and dismiss the welcome loader
     showView('library');
+    hideWelcomeLoader();
 
     // Show cookie consent banner if not yet dismissed
     showCookieConsent();
@@ -531,11 +548,14 @@ function showView(viewName) {
         document.getElementById('downloadView')?.classList.remove('hidden');
     } else if (viewName === 'library') {
         document.getElementById('libraryView')?.classList.remove('hidden');
-        loadHistory().catch((error) => {
-            console.error('Failed to refresh library view:', error);
-            updateLibrary();
-        });
-        requestAnimationFrame(maybeLoadMoreLibraryByScroll);
+        // Only refresh from server if we already have data (user navigated back).
+        // On first load, init() already calls loadHistory().
+        if (State.downloads.length > 0) {
+            loadHistory().catch((error) => {
+                console.error('Failed to refresh library view:', error);
+                updateLibrary();
+            });
+        }
     } else if (viewName === 'playlists') {
         document.getElementById('playlistsView')?.classList.remove('hidden');
         // Trigger data load for the currently active playlist tab

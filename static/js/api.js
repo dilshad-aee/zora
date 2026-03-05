@@ -72,6 +72,12 @@ const API = {
         },
 
         async me() {
+            // Use early-started fetch from HTML head if available
+            if (window._authMePromise) {
+                const result = await window._authMePromise;
+                window._authMePromise = null;
+                return result;
+            }
             const response = await fetch('/api/auth/me');
             if (!response.ok) return null;
             return response.json();

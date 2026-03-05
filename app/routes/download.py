@@ -20,6 +20,7 @@ from app.download_preferences import (
     get_default_download_preferences,
     get_preferred_audio_exts,
 )
+from app.routes.history import invalidate_library_repair
 from app.routes.stream import _ensure_browser_compatible_audio
 
 bp = Blueprint('download', __name__)
@@ -287,6 +288,7 @@ def _background_download(app, job_id: str, url: str, audio_format: str, quality:
 
             with app.app_context():
                 save_track(track_data)
+                invalidate_library_repair()
 
         else:
             print(f"[JOB:{job_id}] Download failed: {result.get('error')}", flush=True)
@@ -511,6 +513,7 @@ def _background_playlist_download(app, session_id):
                             duration=track_duration,
                             file_size=result.get('filesize', 0) or 0,
                         )
+                        invalidate_library_repair()
                     else:
                         song_lookup_payload = {
                             'id': track_video_id,

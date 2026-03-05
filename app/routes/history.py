@@ -18,6 +18,15 @@ bp = Blueprint('history', __name__)
 
 AUDIO_EXTENSIONS = {'.m4a', '.mp3', '.aac', '.ogg', '.opus', '.flac', '.wav', '.webm', '.mka'}
 
+# Track whether the expensive disk-scan repair has already run this server session.
+_library_repaired = False
+
+
+def invalidate_library_repair():
+    """Call after downloads/deletes to force a re-repair on next history load."""
+    global _library_repaired
+    _library_repaired = False
+
 
 def _audio_ext_rank(ext: str, preferred_exts=None) -> int:
     """Return deterministic extension preference rank (lower is better)."""
@@ -257,59 +266,64 @@ def _dedupe_library_rows(downloads: list) -> bool:
 @bp.route('/history', methods=['GET'])
 @login_required
 def get_history():
-    """Get download history and auto-repair stale filenames."""
+    """Get download history. Expensive disk repair only runs once per server session."""
+    global _library_repaired
+
     try:
         downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
-        changed = False
 
-        # Recover from accidental/empty DB state by rebuilding missing rows from audio files.
-        if _sync_missing_download_rows(downloads):
-            changed = True
-            db.session.commit()
-            Download.invalidate_duplicate_cache()
-            downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
+        # Only run the expensive disk-scan repair once after server start
+        # (or after invalidate_library_repair() is called, e.g. after a download).
+        if not _library_repaired:
+            changed = False
 
-        if _dedupe_library_rows(downloads):
-            changed = True
-            db.session.commit()
-            Download.invalidate_duplicate_cache()
-            downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
-
-        for download in downloads:
-            if not download.filename:
-                continue
-
-            fixed_name = _find_existing_audio_variant(download.filename)
-
-            # If no actual file exists for this record, remove stale DB row.
-            if not fixed_name:
-                PlaylistSong.query.filter_by(download_id=download.id).delete(synchronize_session=False)
-                db.session.delete(download)
+            if _sync_missing_download_rows(downloads):
                 changed = True
-                continue
+                db.session.commit()
+                Download.invalidate_duplicate_cache()
+                downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
 
-            if fixed_name != download.filename:
-                download.filename = fixed_name
-                new_ext = os.path.splitext(fixed_name)[1].lower().lstrip('.')
-                if new_ext:
-                    download.format = new_ext
+            if _dedupe_library_rows(downloads):
                 changed = True
+                db.session.commit()
+                Download.invalidate_duplicate_cache()
+                downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
 
-            # Backfill thumbnail when missing using local file first, then YouTube fallback.
-            if not str(download.thumbnail or '').strip():
-                video_id = str(download.video_id or '').strip()
-                if not video_id:
-                    video_id = _extract_video_id_from_filename(fixed_name)
-                if video_id and not video_id.startswith('local_'):
-                    resolved_thumb = _thumbnail_for_video_id(video_id)
-                    if resolved_thumb:
-                        download.thumbnail = resolved_thumb
-                        changed = True
+            for download in downloads:
+                if not download.filename:
+                    continue
 
-        if changed:
-            db.session.commit()
-            Download.invalidate_duplicate_cache()
-            downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
+                fixed_name = _find_existing_audio_variant(download.filename)
+
+                if not fixed_name:
+                    PlaylistSong.query.filter_by(download_id=download.id).delete(synchronize_session=False)
+                    db.session.delete(download)
+                    changed = True
+                    continue
+
+                if fixed_name != download.filename:
+                    download.filename = fixed_name
+                    new_ext = os.path.splitext(fixed_name)[1].lower().lstrip('.')
+                    if new_ext:
+                        download.format = new_ext
+                    changed = True
+
+                if not str(download.thumbnail or '').strip():
+                    video_id = str(download.video_id or '').strip()
+                    if not video_id:
+                        video_id = _extract_video_id_from_filename(fixed_name)
+                    if video_id and not video_id.startswith('local_'):
+                        resolved_thumb = _thumbnail_for_video_id(video_id)
+                        if resolved_thumb:
+                            download.thumbnail = resolved_thumb
+                            changed = True
+
+            if changed:
+                db.session.commit()
+                Download.invalidate_duplicate_cache()
+                downloads = Download.query.order_by(Download.downloaded_at.desc()).all()
+
+            _library_repaired = True
 
         result = []
         for row in downloads:
@@ -341,6 +355,7 @@ def clear_history():
     log_action('HISTORY_CLEAR', target_type='history')
 
     Download.clear_all()
+    invalidate_library_repair()
     return jsonify({'success': True})
 
 
@@ -370,5 +385,6 @@ def delete_download(download_id):
     PlaylistSong.query.filter_by(download_id=download.id).delete(synchronize_session=False)
     db.session.delete(download)
     db.session.commit()
+    invalidate_library_repair()
     
     return jsonify({'success': True})

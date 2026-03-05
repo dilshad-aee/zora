@@ -35,11 +35,18 @@
 
     <title>Zora Music</title>
 
+    <!-- Start auth check early, before JS files load -->
+    <script>
+        window._authMePromise = fetch('/api/auth/me').then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ range(1, 100000) | random }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/desktop.css') }}?v={{ range(1, 100000) | random }}">
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet"></noscript>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/desktop.css') }}">
 </head>
 <body>
     <div class="app">
@@ -1241,6 +1248,18 @@
         <div class="loader-spinner"></div>
         <div class="loader-text" id="loaderText">Loading...</div>
     </div>
+
+    <!-- Welcome Loading Screen -->
+    <div class="welcome-loader hidden" id="welcomeLoader">
+        <div class="welcome-loader__content">
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="Zora" class="welcome-loader__logo">
+            <h2 class="welcome-loader__title" id="welcomeLoaderTitle">Setting up your music...</h2>
+            <div class="welcome-loader__bar">
+                <div class="welcome-loader__bar-fill"></div>
+            </div>
+            <p class="welcome-loader__hint" id="welcomeLoaderHint">Hang tight, this won't take long</p>
+        </div>
+    </div>
     
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
@@ -1278,19 +1297,19 @@
         </div>
     
     <!-- JavaScript Modules -->
-    <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/player.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/downloads.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/spotify-import.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/playlists.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/library.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/playback.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/offline.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/lyrics.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/ui.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/player.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/downloads.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/admin.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/spotify-import.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/playlists.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/library.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/playback.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/offline.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/lyrics.js') }}"></script>
     <!-- Initialize Player -->
     <script>
         window.addEventListener('load', () => {

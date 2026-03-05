@@ -138,6 +138,11 @@ function maybeLoadMoreLibraryByScroll() {
     const mainContent = document.getElementById('mainContent');
     if (!mainContent) return;
 
+    // Only trigger lazy-load if the user has actually scrolled near the bottom.
+    // Ignore when the viewport hasn't been scrolled yet (scrollTop === 0) to
+    // prevent the initial render from loading every batch at once.
+    if (mainContent.scrollTop === 0 && State.library.visibleCount > 0) return;
+
     const remaining = mainContent.scrollHeight - (mainContent.scrollTop + mainContent.clientHeight);
     if (remaining <= 240) {
         loadMoreLibrarySongs();
@@ -225,7 +230,7 @@ function createLibraryCardMarkup(download) {
              data-artist="${UI.escapeHtml(artist)}"
              onclick="playTrack('${UI.escapeJs(filename)}', '${UI.escapeJs(title)}', '${UI.escapeJs(artist)}', '${UI.escapeJs(thumbnail)}')">
             ${actionsMenu}
-            <img src="${thumbnail}" alt="" class="library-card__thumb" onerror="this.src='/static/images/default-album.png'">
+            <img src="${thumbnail}" alt="" class="library-card__thumb" loading="lazy" onerror="this.src='/static/images/default-album.png'">
             <div class="library-card__info">
                 <div class="library-card__title" title="${UI.escapeHtml(title)}">${UI.escapeHtml(title)}</div>
                 <div class="library-card__artist" title="${UI.escapeHtml(artist)}">${UI.escapeHtml(artist)}</div>
@@ -256,6 +261,7 @@ async function deleteLibraryTrack(event, downloadId) {
     });
     if (!confirmed) return;
 
+    UI.showLoader('Deleting song...');
     try {
         await API.deleteHistoryItem(id);
 
@@ -279,6 +285,8 @@ async function deleteLibraryTrack(event, downloadId) {
         UI.toast('Song deleted', 'success');
     } catch (error) {
         UI.toast(error.message || 'Failed to delete song', 'error');
+    } finally {
+        UI.hideLoader();
     }
 }
 

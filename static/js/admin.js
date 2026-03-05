@@ -588,6 +588,8 @@ function renderAdminUsers(data) {
 }
 
 async function changeUserRole(userId, newRole) {
+    const select = event?.target;
+    if (select) select.disabled = true;
     try {
         await API.admin.updateUser(userId, { role: newRole });
         UI.toast('Role updated', 'success');
@@ -595,10 +597,14 @@ async function changeUserRole(userId, newRole) {
     } catch (error) {
         UI.toast(error.message, 'error');
         loadAdminUsers();
+    } finally {
+        if (select) select.disabled = false;
     }
 }
 
 async function toggleUserActive(userId, active) {
+    const btn = event?.target?.closest('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
     try {
         await API.admin.updateUser(userId, { is_active: active });
         UI.toast(active ? 'User activated' : 'User deactivated', 'success');
@@ -737,6 +743,7 @@ async function createCategory() {
 async function deleteCategory(categoryId) {
     if (!confirm('Delete this category? Playlists using it will become uncategorized.')) return;
 
+    UI.showLoader('Deleting category...');
     try {
         await API.categories.delete(categoryId);
         UI.toast('Category deleted', 'success');
@@ -744,5 +751,7 @@ async function deleteCategory(categoryId) {
         _categoriesLoaded = false;
     } catch (err) {
         UI.toast(err.message, 'error');
+    } finally {
+        UI.hideLoader();
     }
 }

@@ -323,11 +323,14 @@ async function saveJobAsPlaylist(jobId, defaultName) {
     const name = prompt('Playlist name:', defaultName || 'Spotify Import');
     if (!name) return;
 
+    UI.showLoader('Saving playlist...');
     try {
         const result = await API.spotify.saveAsPlaylist(jobId, name);
         UI.toast(`Playlist "${name}" created with ${result.tracks_added} tracks!`, 'success');
     } catch (err) {
         UI.toast(err.message, 'error');
+    } finally {
+        UI.hideLoader();
     }
 }
 
