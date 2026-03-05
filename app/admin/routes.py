@@ -85,10 +85,10 @@ def _get_network_info():
         return None
     try:
         io = psutil.net_io_counters()
-        connections = len(psutil.net_connections(kind='inet'))
-    except (psutil.AccessDenied, PermissionError):
-        connections = None
-        io = psutil.net_io_counters()
+        if not io:
+            return None
+    except Exception:
+        return None
 
     result = {
         'bytes_sent_mb': round(io.bytes_sent / 1024 / 1024, 1),
@@ -96,10 +96,13 @@ def _get_network_info():
         'packets_sent': io.packets_sent,
         'packets_recv': io.packets_recv,
     }
-    if connections is not None:
-        result['active_connections'] = connections
 
-    # Network interfaces + IPs
+    try:
+        connections = len(psutil.net_connections(kind='inet'))
+        result['active_connections'] = connections
+    except Exception:
+        pass
+
     try:
         addrs = psutil.net_if_addrs()
         interfaces = []
@@ -130,30 +133,6 @@ def _get_process_info():
         }
     except Exception:
         return {'pid': os.getpid()}
-
-
-def _get_temperature():
-    """CPU/device temperature (works on Termux/Linux, rare on macOS)."""
-    if not _HAS_PSUTIL:
-        return None
-    try:
-        temps = psutil.sensors_temperatures()
-        if not temps:
-            return None
-        # Pick the first sensor with a current reading
-        for name, entries in temps.items():
-            for entry in entries:
-                if entry.current and entry.current > 0:
-                    return {
-                        'sensor': name,
-                        'label': entry.label or name,
-                        'current_c': round(entry.current, 1),
-                        'high_c': round(entry.high, 1) if entry.high else None,
-                        'critical_c': round(entry.critical, 1) if entry.critical else None,
-                    }
-    except (AttributeError, Exception):
-        pass
-    return None
 
 
 def _get_load_average():
@@ -223,16 +202,7 @@ def server_status():
     hours, remainder = divmod(remainder, 3600)
     minutes, _ = divmod(remainder, 60)
 
-    return jsonify({
-        'cpu': _get_cpu_info(),
-        'memory': _get_memory_info(),
-        'disk': _get_disk_info(),
-        'network': _get_network_info(),
-        'process': _get_process_info(),
-        'temperature': _get_temperature(),
-        'load_average': _get_load_average(),
-        'library': _get_library_stats(),
-        'queue': _get_queue_stats(),
+    result = {
         'uptime': {
             'seconds': uptime_sec,
             'formatted': f'{days}d {hours}h {minutes}m' if days else f'{hours}h {minutes}m',
@@ -245,7 +215,25 @@ def server_status():
         },
         'server_time': datetime.now().isoformat(),
         'has_psutil': _HAS_PSUTIL,
-    })
+    }
+
+    # Each section is wrapped individually so one failure doesn't break the rest
+    for key, fn in [
+        ('cpu', _get_cpu_info),
+        ('memory', _get_memory_info),
+        ('disk', _get_disk_info),
+        ('network', _get_network_info),
+        ('process', _get_process_info),
+        ('load_average', _get_load_average),
+        ('library', _get_library_stats),
+        ('queue', _get_queue_stats),
+    ]:
+        try:
+            result[key] = fn()
+        except Exception:
+            result[key] = None
+
+    return jsonify(result)
 
 
 @bp.route('/users', methods=['GET'])

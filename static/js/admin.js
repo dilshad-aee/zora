@@ -488,21 +488,6 @@ function renderServerStatus(data) {
             </div>`;
     }
 
-    // ── Temperature Card ──
-    if (data.temperature) {
-        const tempColor = data.temperature.current_c >= 80 ? '#e74c3c' :
-            data.temperature.current_c >= 60 ? '#f39c12' : '#2ecc71';
-        cards += `
-            <div class="server-card">
-                <div class="server-card__icon" style="color:${tempColor}"><i class="fas fa-thermometer-half"></i></div>
-                <div class="server-card__body">
-                    <div class="server-card__label">Temperature</div>
-                    <div class="server-card__value" style="color:${tempColor}">${data.temperature.current_c}°C</div>
-                    <div class="server-card__sub">${UI.escapeHtml(data.temperature.label)}${data.temperature.high_c ? ' · High: ' + data.temperature.high_c + '°C' : ''}</div>
-                </div>
-            </div>`;
-    }
-
     // ── Server Time ──
     if (data.server_time) {
         const st = new Date(data.server_time);
@@ -523,7 +508,7 @@ function renderServerStatus(data) {
                 <div class="server-card__icon"><i class="fas fa-exclamation-triangle"></i></div>
                 <div class="server-card__body">
                     <div class="server-card__label">Limited Metrics</div>
-                    <div class="server-card__sub">Install <code>psutil</code> for CPU, memory, network, and temperature data:<br><code>pip install psutil</code></div>
+                    <div class="server-card__sub">Install <code>psutil</code> for CPU, memory, and network data:<br><code>pip install psutil</code></div>
                 </div>
             </div>`;
     }
