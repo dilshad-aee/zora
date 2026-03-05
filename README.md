@@ -4,7 +4,7 @@
 
 Zora lets you build your own personal music library and stream it from anywhere — with a modern web UI, playlists, lock screen controls, and more.
 
-> **Try Zora live →** [zora.crackery.in](https://www.zora.crackery.in)
+> **Try Zora live →** [zora.crackery.in](https://zora.crackery.in)
 
 ## Features
 
