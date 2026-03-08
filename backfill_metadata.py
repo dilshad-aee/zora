@@ -255,6 +255,11 @@ def main():
                 meta['tags'], meta['title'], meta['description']
             )
 
+            # Normalize to canonical forms (hi → hindi, etc.)
+            from normalize_metadata import normalize_language, normalize_genre, normalize_artist
+            lang = normalize_language(lang) if lang else lang
+            genre = normalize_genre(genre) if genre else genre
+
             tags_json = json.dumps(meta['tags'][:30]) if meta['tags'] else '[]'
             album = meta.get('album', '') or ''
 
