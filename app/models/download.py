@@ -28,6 +28,12 @@ class Download(db.Model):
     file_size = db.Column(db.Integer, default=0)
     downloaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Enriched metadata (populated by backfill_metadata.py or at download time)
+    language = db.Column(db.String(50))
+    genre = db.Column(db.String(100))
+    tags = db.Column(db.Text)           # JSON-encoded list of tags
+    album = db.Column(db.String(300))
+
     # In-memory duplicate index for fast checks
     _dup_cache_lock = threading.Lock()
     _dup_cache = None
@@ -70,6 +76,10 @@ class Download(db.Model):
             'file_size': self.file_size,
             'downloaded_at': self.downloaded_at.isoformat() if self.downloaded_at else None,
             'completed_at': self.downloaded_at.isoformat() if self.downloaded_at else None,
+            'language': self.language,
+            'genre': self.genre,
+            'tags': self.tags,
+            'album': self.album,
         }
     
     def _extract_video_id(self):
