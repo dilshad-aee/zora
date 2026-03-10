@@ -133,6 +133,9 @@ def create_app(testing=False):
     from app.routes.lyrics import bp as lyrics_bp
     from app.admin.routes import bp as admin_bp
     from app.routes.spotify_import import bp as spotify_import_bp
+    from app.routes.feed import bp as feed_bp
+    from app.routes.onboarding import bp as onboarding_bp
+    from app.routes.song_actions import bp as song_actions_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(google_auth_bp)
@@ -149,6 +152,9 @@ def create_app(testing=False):
     app.register_blueprint(stream_bp)
     app.register_blueprint(lyrics_bp)
     app.register_blueprint(spotify_import_bp, url_prefix='/api/spotify-import')
+    app.register_blueprint(feed_bp, url_prefix='/api')
+    app.register_blueprint(onboarding_bp, url_prefix='/api')
+    app.register_blueprint(song_actions_bp, url_prefix='/api')
     
     # Default-deny: require auth on all routes except explicit allowlist
     PUBLIC_ENDPOINTS = {

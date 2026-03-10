@@ -13,10 +13,14 @@ from .audit_log import AuditLog, log_action
 from .password_reset import PasswordResetToken
 from .user_preference import UserPreference
 from .spotify_import import SpotifyImportJob, SpotifyImportTrack
+from .song_like import SongLike
+from .play_event import PlayEvent
+from .user_taste import UserTaste
 
 __all__ = [
     'db', 'init_db', 'Download', 'Playlist', 'PlaylistSong',
     'PlaylistCategory', 'PlaylistLike', 'Settings', 'User',
     'AuditLog', 'log_action', 'PasswordResetToken', 'UserPreference',
     'SpotifyImportJob', 'SpotifyImportTrack',
+    'SongLike', 'PlayEvent', 'UserTaste',
 ]

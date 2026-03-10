@@ -22,6 +22,7 @@ from app.download_preferences import (
 )
 from app.routes.history import invalidate_library_repair
 from app.routes.stream import _ensure_browser_compatible_audio
+from app.services.normalization import extract_and_normalize_metadata
 
 bp = Blueprint('download', __name__)
 
@@ -216,16 +217,20 @@ def _background_download(app, job_id: str, url: str, audio_format: str, quality:
             if full_path and os.path.exists(full_path):
                 file_size = os.path.getsize(full_path)
 
+            meta = extract_and_normalize_metadata(track_info)
+
             Download.add(
                 video_id=existing_id,
                 title=track_info.get('title', 'Unknown'),
-                artist=track_info.get('artist') or track_info.get('uploader', 'Unknown'),
+                artist=meta['artist'] or track_info.get('artist') or track_info.get('uploader', 'Unknown'),
                 filename=filename,
                 format=audio_format.upper(),
                 quality=f'{quality}kbps',
                 thumbnail=thumbnail or '',
                 duration=track_info.get('duration', 0),
-                file_size=file_size
+                file_size=file_size,
+                language=meta['language'],
+                genre=meta['genre'],
             )
             print(f"[JOB:{job_id}] ✅ Saved to DB: {track_info.get('title')}", flush=True)
 
@@ -504,14 +509,22 @@ def _background_playlist_download(app, session_id):
 
                     download_row = None
                     if not is_duplicate:
+                        meta = extract_and_normalize_metadata({
+                            **song, **result,
+                            'artist': track_artist,
+                            'title': track_title,
+                        })
+
                         download_row = Download.add(
                             video_id=track_video_id,
                             title=track_title,
-                            artist=track_artist or 'Unknown',
+                            artist=meta['artist'] or track_artist or 'Unknown',
                             filename=track_filename,
                             thumbnail=thumbnail or '',
                             duration=track_duration,
                             file_size=result.get('filesize', 0) or 0,
+                            language=meta['language'],
+                            genre=meta['genre'],
                         )
                         invalidate_library_repair()
                     else:
