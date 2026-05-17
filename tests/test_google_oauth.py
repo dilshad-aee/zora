@@ -69,6 +69,15 @@ class TestGoogleOAuthStart:
         resp = client.get('/api/auth/google/start')
         assert resp.status_code != 401
 
+    def test_start_client_creation_failure_redirects_with_error(self, app):
+        """OAuth client setup failures must not raise a 500."""
+        client = app.test_client()
+        with patch('app.auth.google.oauth.create_client', side_effect=RuntimeError('not configured')):
+            resp = client.get('/api/auth/google/start')
+
+        assert resp.status_code == 302
+        assert 'error=google_not_configured' in resp.headers.get('Location', '')
+
 
 class TestGoogleOAuthCallback:
     """Test the /api/auth/google/callback handling."""

@@ -17,7 +17,7 @@ app = create_app()
 
 if __name__ == '__main__':
     host = os.getenv('ZORA_HOST', '0.0.0.0')
-    port = int(os.getenv('ZORA_PORT', '5001'))
+    port = int(os.getenv('PORT', os.getenv('ZORA_PORT', '5001')))
 
     print("""
     ╔═══════════════════════════════════════╗

@@ -388,6 +388,7 @@ class TestNoUnguardedEndpoints:
             'google_auth.google_start',
             'google_auth.google_callback',
             'api.index',
+            'service_worker',
             'static',
         }
         SKIP_ENDPOINTS = {'static', 'google_auth.google_start', 'google_auth.google_callback'}

@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 
 from authlib.integrations.flask_client import OAuth
-from flask import Blueprint, redirect, url_for, session, jsonify
+from flask import Blueprint, current_app, redirect, url_for
 from flask_login import login_user
 
 from app.models import db, User
@@ -26,11 +26,12 @@ def init_google_oauth(app):
     client_id = os.getenv('GOOGLE_CLIENT_ID')
     client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
 
+    oauth.init_app(app)
+
     if not client_id or not client_secret:
         app.logger.info('Google OAuth not configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing)')
         return False
 
-    oauth.init_app(app)
     oauth.register(
         name='google',
         client_id=client_id,
@@ -41,25 +42,38 @@ def init_google_oauth(app):
     return True
 
 
+def _get_google_client():
+    """Return the configured Google OAuth client, or None if unavailable."""
+    try:
+        return oauth.create_client('google')
+    except Exception:
+        current_app.logger.exception('Failed to create Google OAuth client')
+        return None
+
+
 @bp.route('/api/auth/google/start')
 def google_start():
     """Redirect user to Google consent screen."""
-    google = oauth.create_client('google')
+    google = _get_google_client()
     if google is None:
-        return jsonify({'error': 'Google OAuth is not configured'}), 503
+        return redirect('/?error=google_not_configured')
 
     base_url = os.getenv('ZORA_BASE_URL', '').rstrip('/')
     if base_url:
         redirect_uri = f"{base_url}/api/auth/google/callback"
     else:
         redirect_uri = url_for('google_auth.google_callback', _external=True)
-    return google.authorize_redirect(redirect_uri, nonce=os.urandom(16).hex())
+    try:
+        return google.authorize_redirect(redirect_uri, nonce=os.urandom(16).hex())
+    except Exception:
+        current_app.logger.exception('Failed to start Google OAuth redirect')
+        return redirect('/?error=google_auth_failed')
 
 
 @bp.route('/api/auth/google/callback')
 def google_callback():
     """Handle the OAuth callback from Google."""
-    google = oauth.create_client('google')
+    google = _get_google_client()
     if google is None:
         return redirect('/?error=google_not_configured')
 
