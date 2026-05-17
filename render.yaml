@@ -19,7 +19,7 @@ services:
       - key: ZORA_ADMIN_PASSWORD
         sync: false
       - key: ZORA_BASE_URL
-        sync: false
+        value: https://zora-e6n4.onrender.com
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
