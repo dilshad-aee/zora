@@ -45,9 +45,18 @@ class Download(db.Model):
         thumbnail = None
         real_video_id = self._extract_video_id()
         thumbnails_dir = get_thumbnails_dir()
+
+        # When R2 is configured, prefer R2 thumbnail URLs
+        from app.r2_storage import r2
+        if r2.is_configured and real_video_id:
+            for ext in ['.webp', '.jpg', '.png', '.jpeg']:
+                r2_url = r2.get_thumbnail_url(f"{real_video_id}{ext}")
+                if r2_url:
+                    thumbnail = r2_url
+                    break
         
-        # Try to find a local thumbnail
-        if real_video_id:
+        # Try to find a local thumbnail (fallback when R2 not configured)
+        if not thumbnail and real_video_id:
             for ext in ['.webp', '.jpg', '.png', '.jpeg']:
                 thumb_name = f"{real_video_id}{ext}"
                 if (thumbnails_dir / thumb_name).exists():

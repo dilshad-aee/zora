@@ -22,6 +22,7 @@ from app.download_preferences import (
 )
 from app.routes.history import invalidate_library_repair
 from app.routes.stream import _ensure_browser_compatible_audio
+from app.r2_storage import r2
 
 bp = Blueprint('download', __name__)
 
@@ -227,6 +228,22 @@ def _background_download(app, job_id: str, url: str, audio_format: str, quality:
                 duration=track_info.get('duration', 0),
                 file_size=file_size
             )
+
+            # ─── Upload to R2 ─────────────────────────────────────────
+            if r2.is_configured and filename:
+                audio_path = os.path.join(str(get_download_dir()), filename)
+                r2.upload_audio(audio_path, filename)
+
+                # Upload thumbnail if local file exists
+                if existing_id:
+                    thumbnails_dir = get_download_dir() / 'thumbnails'
+                    for ext in ['.webp', '.jpg', '.png', '.jpeg']:
+                        thumb_file = thumbnails_dir / f"{existing_id}{ext}"
+                        if thumb_file.exists():
+                            r2.upload_thumbnail(str(thumb_file), f"{existing_id}{ext}")
+                            break
+            # ──────────────────────────────────────────────────────────
+
             print(f"[JOB:{job_id}] ✅ Saved to DB: {track_info.get('title')}", flush=True)
 
         except Exception as db_err:
@@ -514,6 +531,19 @@ def _background_playlist_download(app, session_id):
                             file_size=result.get('filesize', 0) or 0,
                         )
                         invalidate_library_repair()
+
+                        # ─── Upload to R2 ─────────────────────────
+                        if r2.is_configured and track_filename:
+                            audio_path = str(get_download_dir() / track_filename)
+                            r2.upload_audio(audio_path, track_filename)
+                            if track_video_id:
+                                thumbnails_dir = get_download_dir() / 'thumbnails'
+                                for ext in ['.webp', '.jpg', '.png', '.jpeg']:
+                                    thumb_file = thumbnails_dir / f"{track_video_id}{ext}"
+                                    if thumb_file.exists():
+                                        r2.upload_thumbnail(str(thumb_file), f"{track_video_id}{ext}")
+                                        break
+                        # ──────────────────────────────────────────
                     else:
                         song_lookup_payload = {
                             'id': track_video_id,

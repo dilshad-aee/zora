@@ -13,6 +13,7 @@ from app.auth.decorators import admin_required
 from app.models import Download, PlaylistSong, db
 from app.storage_paths import get_download_dir, get_thumbnails_dir
 from app.download_preferences import get_preferred_audio_exts, get_default_quality_label
+from app.r2_storage import r2
 
 bp = Blueprint('history', __name__)
 
@@ -83,9 +84,16 @@ def _derive_title_artist_from_filename(filename: str):
 
 
 def _thumbnail_for_video_id(video_id: str) -> str:
-    """Resolve local thumbnail first, fallback to YouTube thumbnail URL."""
+    """Resolve R2 thumbnail first, then local, fallback to YouTube thumbnail URL."""
     if not video_id:
         return ''
+
+    # Prefer R2 when configured
+    if r2.is_configured:
+        for ext in ('.webp', '.jpg', '.png', '.jpeg'):
+            r2_url = r2.get_thumbnail_url(f"{video_id}{ext}")
+            if r2_url:
+                return r2_url
 
     thumbnails_dir = get_thumbnails_dir()
     for ext in ('.webp', '.jpg', '.png', '.jpeg'):
@@ -380,6 +388,14 @@ def delete_download(download_id):
                 filepath.unlink()
             except Exception as e:
                 return jsonify({'error': f'Failed to delete file: {str(e)}'}), 500
+
+        # Delete from R2 as well
+        if r2.is_configured:
+            r2.delete_audio(resolved_name)
+            video_id = (download.video_id or '').strip()
+            if video_id and not video_id.startswith('local_'):
+                for ext in ['.webp', '.jpg', '.png', '.jpeg']:
+                    r2.delete_thumbnail(f"{video_id}{ext}")
     
     # Delete from database
     PlaylistSong.query.filter_by(download_id=download.id).delete(synchronize_session=False)

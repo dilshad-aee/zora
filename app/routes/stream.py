@@ -5,12 +5,13 @@ Stream Routes - Audio playback, thumbnails, and file downloads.
 import os
 import re
 
-from flask import Blueprint, jsonify, send_from_directory, request, Response
+from flask import Blueprint, jsonify, send_from_directory, request, Response, redirect
 from flask_login import login_required
 from werkzeug.http import http_date
 
 from app.auth.decorators import admin_required
 from app.storage_paths import get_download_dir, get_thumbnails_dir
+from app.r2_storage import r2
 from app.download_preferences import (
     get_default_download_preferences,
     get_preferred_audio_exts,
@@ -244,14 +245,24 @@ def serve_download(filename):
 @bp.route('/api/thumbnails/<filename>')
 @login_required
 def serve_thumbnail(filename):
-    """Serve downloaded thumbnails."""
+    """Serve downloaded thumbnails. Redirects to R2 when configured."""
+    if r2.is_configured:
+        r2_url = r2.get_thumbnail_url(filename)
+        if r2_url:
+            return redirect(r2_url)
     return send_from_directory(str(get_thumbnails_dir()), filename)
 
 
 @bp.route('/play/<filename>', methods=["GET", "HEAD"])
 @login_required
 def play_audio(filename):
-    """Stream audio file with HTTP Range support for instant seek / low-latency start."""
+    """Stream audio file. Redirects to R2 when configured, else local range-request."""
+    # When R2 is configured, redirect to public URL (R2 handles Range natively)
+    if r2.is_configured:
+        r2_url = r2.get_audio_url(filename)
+        if r2_url:
+            return redirect(r2_url)
+
     resolved_filename = _resolve_playable_filename(filename)
     if not resolved_filename:
         return jsonify({'error': 'File not found'}), 404

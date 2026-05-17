@@ -1,0 +1,45 @@
+# ──────────────────────────────────────────────────────────────────
+# Render Blueprint — Zora Music
+# Deploy: Connect this repo to Render and it auto-detects this file.
+# ──────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: zora-music
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ZORA_ADMIN_EMAIL
+        sync: false
+      - key: ZORA_ADMIN_PASSWORD
+        sync: false
+      - key: ZORA_BASE_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      # ─── Cloudflare R2 ─────────────────────────────
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false
